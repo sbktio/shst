@@ -12,6 +12,7 @@ const wasmDir = path.join(
   'dist'
 );
 const wasmFiles = ['wasm_exec.js', 'main.wasm'];
+const demoPort = Number(process.env.WHITEBOARD_DEMO_PORT ?? 5199);
 
 /** Serve wasm_exec.js and main.wasm under /tailcat/, precompressed in dev. */
 function tailcatAssets(): Plugin {
@@ -63,6 +64,6 @@ function tailcatAssets(): Plugin {
 
 export default defineConfig({
   plugins: [tailcatAssets()],
-  server: { port: 5199, strictPort: true, open: false },
-  preview: { port: 5199, strictPort: true },
+  server: { port: demoPort, strictPort: true, open: false },
+  preview: { port: demoPort, strictPort: true },
 });

@@ -27,15 +27,29 @@ git submodule update --init --recursive
 - `packages/tsconfig` — shared strict TypeScript configuration
 - `package/tailcat` — pinned source from the [`sbktio/tailcat`](https://github.com/sbktio/tailcat) fork
 
-## Prerequisites
+## macOS prerequisites
 
-Tool versions are pinned in `mise.toml`. Automatic installation is disabled,
-following the Home repository's isolate-first setup:
+You do not need to install Node.js, pnpm, or Go separately. Their versions are
+pinned in `mise.toml`, and mise installs them for this repository. This project
+requires **pnpm 12.18.0**.
 
-```sh
-mise install
-pnpm install
-```
+1. If Homebrew is not installed, follow the instructions at
+   <https://brew.sh/>.
+2. Install mise:
+
+   ```sh
+   brew install mise
+   ```
+
+3. From the repository root, install the pinned Node.js, pnpm, and Go versions:
+
+   ```sh
+   mise install
+   ```
+
+The commands below use `mise exec --` so they work without changing the shell
+configuration. If mise is already activated in your shell, that prefix is
+optional.
 
 pnpm uses the effective user npm configuration, including the registry proxy in
 `~/.npmrc`; this repository does not copy or override credentials. The
@@ -44,55 +58,88 @@ URLs from the lockfile while preserving integrity hashes. If an existing
 lockfile contains shard URLs, repair it with:
 
 ```sh
-pnpm run lockfile:repair
+mise exec -- pnpm run lockfile:repair
 ```
 
 ## Build and run the whiteboard demo
 
 Run these steps from the repository root:
 
-1. Install the pinned tools and project dependencies:
+1. Install the project dependencies:
 
    ```sh
-   mise install
-   pnpm install
+   mise exec -- pnpm install
    ```
 
 2. Build the Go/Wasm bridge and the whiteboard application:
 
    ```sh
-   pnpm build
+   mise exec -- pnpm demo:build
    ```
 
-3. Start the development server:
+3. Start the development server in the background. The command waits for HTTP
+   readiness and prints the URL:
 
    ```sh
-   pnpm dev
+   mise exec -- pnpm demo:start
    ```
 
-4. Open <http://localhost:5199/> in two browser windows.
+4. Inspect or stop the managed server from any terminal:
 
-5. In the first window, enter a name and choose **Host**. The app displays a
+   ```sh
+   mise exec -- pnpm demo:status
+   mise exec -- pnpm demo:stop
+   ```
+
+   Runtime metadata and logs stay in the gitignored `.whiteboard-demo/`
+   directory. Repeated start and stop commands are safe.
+
+5. Open <http://localhost:5199/> in two browser windows.
+
+6. In the first window, enter a name and choose **Host**. The app displays a
    three-word connection code.
 
-6. In the second window, enter a name, type the three-word code, and press
+7. In the second window, enter a name, type the three-word code, and press
    **Enter** to join. Move the pointer over the board to share the cursor, or
    click the board to add a note.
 
-Stop the server with **Ctrl+C**.
+To use another port, set it when starting the managed server:
+
+```sh
+WHITEBOARD_DEMO_PORT=5200 mise exec -- pnpm demo:start
+```
+
+### Coding-agent skill
+
+The repository includes a provider-neutral `whiteboard-demo` skill that tells a
+coding agent to use the managed lifecycle instead of launching or killing Vite
+directly. Ask Claude Code, Codex CLI, or Copilot CLI to use the
+`whiteboard-demo` skill to build, start, inspect, or stop the app. For example:
+
+```text
+Use the whiteboard-demo skill to start the demo and tell me its URL.
+Use the whiteboard-demo skill to check whether the demo is healthy.
+Use the whiteboard-demo skill to stop the demo.
+```
+
+Claude Code also exposes it as `/whiteboard-demo`. The canonical workflow is in
+`.agents/skills/whiteboard-demo/SKILL.md`; compatibility entry points live in
+`.claude/skills/whiteboard-demo/` and `.github/skills/whiteboard-demo/`.
+Agents should run `demo:stop` when their task is finished so no background demo
+process remains.
 
 ## Checks
 
 ```sh
 # Typecheck and run the TypeScript tests.
-pnpm typecheck
-pnpm test
+mise exec -- pnpm typecheck
+mise exec -- pnpm test
 
 # Run the Go tests for the transport wrapper.
-pnpm test:go
+mise exec -- pnpm test:go
 
 # Run all checks and build the static application.
-pnpm validate
+mise exec -- pnpm validate
 ```
 
 See `apps/whiteboard/README.md` and `packages/tailcat-transport/README.md` for
@@ -110,7 +157,7 @@ its complete test suite with:
 
 ```sh
 cd package/tailcat
-go test ./...
+mise exec -- go test ./...
 ```
 
 See the submodule's [README](package/tailcat/README.md), [installation guide](package/tailcat/INSTALL.md),

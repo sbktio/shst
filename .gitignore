@@ -8,8 +8,9 @@ apps/*/bin/
 packages/*/dist/
 coverage/
 
-# Local test and browser artifacts
+# Local test, browser, and managed demo runtime artifacts
 .screenshots/
+.whiteboard-demo/
 test-results/
 playwright-report/
 

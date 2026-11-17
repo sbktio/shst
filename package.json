@@ -16,6 +16,10 @@
   "scripts": {
     "build": "pnpm run build:wasm && turbo run build",
     "build:wasm": "turbo run build:wasm --filter=@shst/tailcat-transport",
+    "demo:build": "node scripts/whiteboard-demo.mjs build",
+    "demo:start": "node scripts/whiteboard-demo.mjs start",
+    "demo:status": "node scripts/whiteboard-demo.mjs status",
+    "demo:stop": "node scripts/whiteboard-demo.mjs stop",
     "dev": "pnpm run build:wasm && turbo run dev --filter=@shst/whiteboard-app",
     "lockfile:check": "node apply-pnpm-tarball-policy.mjs --check",
     "lockfile:repair": "node apply-pnpm-tarball-policy.mjs && pnpm install --lockfile-only",
