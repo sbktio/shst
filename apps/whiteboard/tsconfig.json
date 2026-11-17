@@ -1,0 +1,10 @@
+{
+  "extends": "@shst/tsconfig/vite.json",
+  "compilerOptions": {
+    // vite.config.ts and test/live.test.ts run in Node, which strips types; so does
+    // the workspace source this app imports.
+    "erasableSyntaxOnly": true,
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts"]
+}

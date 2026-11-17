@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Bun runs and bundles the source itself and resolves imports like a bundler.
+  "extends": "./base.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "types": ["bun"]
+  }
+}

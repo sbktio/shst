@@ -1,0 +1,16 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Remove unstable proxy-shard tarball URLs while preserving integrity hashes.
+pnpmfile: .pnpmfile.cjs
+
+# Refresh a stale workspace graph before running a script.
+verifyDepsBeforeRun: install
+
+# Give the ecosystem time to detect compromised releases.
+minimumReleaseAge: 20160
+
+# esbuild only verifies the platform-specific binary installed by pnpm.
+allowBuilds:
+  esbuild: false

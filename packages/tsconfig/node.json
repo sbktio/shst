@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Node runs the source directly by stripping types (node --test test/**/*.test.ts),
+  // so imports name the .ts file and only erasable syntax is allowed.
+  "extends": "./base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["node"]
+  }
+}

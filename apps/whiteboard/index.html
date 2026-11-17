@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collab Whiteboard</title>
+    <style>
+      /* ---- Design tokens --------------------------------------------------
+         Every size and space is a multiple of the 4 px grid. Components use
+         these tokens only; no raw values below this block except 0. */
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+
+        /* Grid and spacing */
+        --grid: 4px;
+        --space-xs: calc(var(--grid) * 1); /*  4 */
+        --space-s: calc(var(--grid) * 2); /*  8 */
+        --space-m: calc(var(--grid) * 3); /* 12 */
+        --space-l: calc(var(--grid) * 4); /* 16 */
+
+        /* Sizes */
+        --size-control: calc(var(--grid) * 8); /* 32: every control and chip */
+        --size-pill: calc(var(--grid) * 6); /* 24 */
+        --size-icon: calc(var(--grid) * 4); /* 16 */
+        --size-bars: calc(var(--grid) * 3); /* 12 */
+        --size-dot: calc(var(--grid) * 2); /*  8 */
+        --size-bar: 3px; /* one signal bar's width; an icon detail */
+        --size-name: calc(var(--grid) * 36); /* 144 */
+        --size-code: calc(var(--grid) * 72); /* 288 */
+        --size-tip: calc(var(--grid) * 80); /* 320: tooltip max width */
+        --size-tip-label: calc(var(--grid) * 18); /* 72: its label column */
+        --size-panel: calc(var(--grid) * 115); /* 460 */
+        --size-page: calc(var(--grid) * 230); /* 920 */
+
+        /* Shape */
+        --radius-control: calc(
+          var(--grid) * 3
+        ); /* 12: inputs, toggle, selects, containers */
+        --radius-board: calc(var(--grid) * 2); /*  8 */
+        --radius-pill: calc(var(--size-pill) / 2);
+        --radius-inner: calc(var(--grid) * 2); /*  8: inside a control */
+        --radius-bar: 1px;
+        --stroke-thin: 1px;
+        --stroke-thick: 2px;
+
+        /* Type */
+        --font-body: 13px;
+        --line-body: calc(var(--grid) * 5); /* 20 */
+        --font-title: 16px;
+        --line-title: calc(var(--grid) * 6); /* 24 */
+        --font-code: 14px;
+        --font-small: 11px;
+        --line-small: calc(var(--grid) * 4); /* 16 */
+        --weight-strong: 600;
+
+        /* Colour */
+        --text: #1b1b1b;
+        --text-muted: #6b6b6b;
+        --text-on-strong: #fff;
+        --surface: #fff;
+        --surface-subtle: #f7f7f7;
+        --surface-board: #fafafa;
+        --surface-strong: #1b1b1b;
+        --surface-toast: rgb(27 27 27 / 0.86);
+        --stroke: #d6d6d6;
+        --stroke-control: #8a8a8a;
+        --brand: #0f6cbd;
+        --brand-rgb: 15 108 189;
+        --accent-rgb: 135 100 184;
+        --error: #a4262c;
+        --error-bg: #fdecee;
+        --error-stroke: #f1bbbf;
+        --ping-4: #13a10e;
+        --ping-3: #8cbd18;
+        --ping-2: #eaa300;
+        --ping-1: #d13438;
+        --ping-off: #c8c8c8;
+
+        /* Elevation (Fluent shadow0/2/4; 0 keeps two layers so it eases) */
+        --shadow-0: 0 0 0 rgb(0 0 0 / 0), 0 0 0 rgb(0 0 0 / 0);
+        --shadow-2: 0 0 2px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.14);
+        --shadow-4: 0 0 2px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.14);
+        --shadow-16: 0 0 2px rgb(0 0 0 / 0.12), 0 8px 16px rgb(0 0 0 / 0.14);
+
+        /* Motion */
+        --duration-fast: 150ms;
+        --duration-normal: 300ms;
+        --duration-slow: 600ms;
+        --duration-dwell: 4000ms; /* transient pills; DWELL_MS */
+        --duration-announce: 3200ms;
+        --delay-settle: 3s; /* after connecting; SETTLE_MS */
+        --ease-decelerate: cubic-bezier(0.1, 0.9, 0.2, 1);
+        --ease-accelerate: cubic-bezier(0.7, 0, 1, 0.5);
+        --ease-easy: cubic-bezier(0.33, 0, 0.67, 1);
+      }
+
+      /* ---- Page ---------------------------------------------------------- */
+      body {
+        margin: 0;
+        padding: var(--space-m) var(--space-l);
+        background: var(--surface);
+        color: var(--text);
+        font-size: var(--font-body);
+        line-height: var(--line-body);
+      }
+      main {
+        max-width: var(--size-page);
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+      }
+      /* Sections are spaced with margins rather than a grid gap, so a
+         collapsed section takes its spacing with it. */
+      main > * + * {
+        margin-top: var(--space-s);
+      }
+      main > .board-wrap {
+        margin-top: var(--space-m);
+      }
+      h1 {
+        margin: 0;
+        font-size: var(--font-title);
+        line-height: var(--line-title);
+        font-weight: var(--weight-strong);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-s);
+        align-items: center;
+      }
+
+      /* ---- Controls ------------------------------------------------------ */
+      input,
+      select,
+      button {
+        box-sizing: border-box;
+        min-width: 0;
+        font: inherit;
+        color: inherit;
+      }
+      input,
+      select {
+        height: var(--size-control);
+        padding: 0 var(--space-m);
+        border: var(--stroke-thin) solid var(--stroke-control);
+        border-radius: var(--radius-control);
+        background: var(--surface);
+      }
+      :disabled,
+      input:read-only {
+        cursor: default;
+      }
+      select:disabled,
+      input:disabled {
+        opacity: 0.55;
+      }
+      #opt-name {
+        width: var(--size-name);
+      }
+      :focus-visible {
+        outline: var(--stroke-thick) solid var(--brand);
+        outline-offset: var(--stroke-thin);
+      }
+
+      .toggle {
+        display: inline-flex;
+        box-sizing: border-box;
+        height: var(--size-control);
+        border: var(--stroke-thin) solid var(--stroke-control);
+        border-radius: var(--radius-control);
+        overflow: hidden;
+        background: var(--surface);
+      }
+      .toggle button {
+        padding: 0 var(--space-m);
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        transition: background-color var(--duration-fast) var(--ease-easy);
+      }
+      .toggle button + button {
+        border-left: var(--stroke-thin) solid var(--stroke-control);
+      }
+      .toggle button[aria-pressed='true'] {
+        background: var(--surface-strong);
+        color: var(--text-on-strong);
+      }
+      .toggle button:disabled {
+        cursor: default;
+      }
+      /* Inside the toggle's clipped edge, so the ring is not cut off. */
+      .toggle button:focus-visible {
+        outline-offset: calc(var(--stroke-thick) * -1);
+      }
+      .toggle button:disabled[aria-pressed='false'] {
+        opacity: 0.45;
+      }
+      .toggle.nudge {
+        animation: nudge var(--duration-slow) var(--ease-decelerate);
+      }
+      @keyframes nudge {
+        0% {
+          box-shadow: 0 0 0 0 rgb(var(--brand-rgb) / 0.55);
+        }
+        35% {
+          box-shadow: 0 0 0 var(--space-xs) rgb(var(--brand-rgb) / 0.35);
+        }
+        100% {
+          box-shadow: 0 0 0 var(--space-s) rgb(var(--brand-rgb) / 0);
+        }
+      }
+
+      #code {
+        flex: 1 1 var(--size-code);
+        font-family: ui-monospace, monospace;
+        font-size: var(--font-code);
+        transition: color var(--duration-slow) var(--ease-easy);
+      }
+      #code.waiting {
+        color: var(--brand);
+        font-weight: var(--weight-strong);
+      }
+      #code::placeholder {
+        color: var(--text-muted);
+        font-family: system-ui, sans-serif;
+        font-size: var(--font-body);
+        font-weight: normal;
+      }
+      #code[hidden] {
+        display: none;
+      }
+
+      /* The session code, once there is one: a button that copies it. */
+      .code-copy {
+        flex: 1 1 var(--size-code);
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-s);
+        height: var(--size-control);
+        padding: 0 var(--space-xs) 0 var(--space-m);
+        border: var(--stroke-thin) solid var(--stroke-control);
+        border-radius: var(--radius-control);
+        background: var(--surface);
+        text-align: left;
+        cursor: pointer;
+        transition:
+          border-color var(--duration-fast) var(--ease-easy),
+          background-color var(--duration-fast) var(--ease-easy);
+      }
+      .code-copy[hidden] {
+        display: none;
+      }
+      .code-copy:hover {
+        background: var(--surface-subtle);
+      }
+      .code-copy:active {
+        background: var(--stroke);
+      }
+      .code-copy-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, monospace;
+        font-size: var(--font-code);
+        transition: color var(--duration-slow) var(--ease-easy);
+      }
+      .code-copy.waiting .code-copy-text {
+        color: var(--brand);
+        font-weight: var(--weight-strong);
+      }
+      .code-copy-hint {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-xs);
+        height: var(--size-pill);
+        padding: 0 var(--space-s);
+        border-radius: var(--radius-inner);
+        color: var(--text-muted);
+        transition:
+          color var(--duration-fast) var(--ease-easy),
+          background-color var(--duration-fast) var(--ease-easy);
+      }
+      .code-copy:hover .code-copy-hint {
+        color: var(--text);
+        background: var(--surface);
+      }
+      .code-copy-icon {
+        position: relative;
+        width: var(--size-icon);
+        height: var(--size-icon);
+      }
+      .code-copy-icon svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition:
+          opacity var(--duration-fast) var(--ease-easy),
+          transform var(--duration-normal) var(--ease-decelerate);
+      }
+      .code-copy .icon-check,
+      .code-copy .icon-error,
+      .code-copy:not([data-state='idle']) .icon-copy {
+        opacity: 0;
+        transform: scale(0.6);
+      }
+      /* Copied: the copy icon gives way to a check that pops in, the label
+         reads "Copied", and the button takes the brand colour, then all of
+         it eases back after CONFIRM_MS (codeCopy.ts). */
+      .code-copy[data-state='copied'] {
+        border-color: var(--brand);
+      }
+      .code-copy[data-state='copied'] .code-copy-hint {
+        color: var(--brand);
+        background: rgb(var(--brand-rgb) / 0.1);
+      }
+      .code-copy[data-state='copied'] .icon-check,
+      .code-copy[data-state='failed'] .icon-error {
+        opacity: 1;
+        transform: none;
+      }
+      .code-copy[data-state='copied'] .icon-check path {
+        stroke-dasharray: 16;
+        animation: check-draw var(--duration-normal) var(--ease-decelerate)
+          both;
+      }
+      @keyframes check-draw {
+        from {
+          stroke-dashoffset: 16;
+        }
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .code-copy[data-state='failed'] {
+        border-color: var(--error-stroke);
+      }
+      .code-copy[data-state='failed'] .code-copy-hint {
+        color: var(--error);
+        background: var(--error-bg);
+      }
+      /* For the legacy copy fallback's scratch textarea. */
+      .offscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .icon-button {
+        width: var(--size-control);
+        height: var(--size-control);
+        padding: 0;
+        border: var(--stroke-thin) solid transparent;
+        border-radius: var(--radius-control);
+        background: transparent;
+        color: var(--text-muted);
+        font-family: ui-monospace, monospace;
+        font-size: var(--font-code);
+        font-weight: var(--weight-strong);
+        cursor: pointer;
+        transition:
+          background-color var(--duration-fast) var(--ease-easy),
+          color var(--duration-fast) var(--ease-easy);
+      }
+      .icon-button:hover,
+      .icon-button[aria-expanded='true'] {
+        color: var(--text);
+        background: var(--surface);
+        border-color: var(--stroke);
+      }
+
+      /* ---- Options: shown only while not in a session -------------------- */
+      main > .collapsible {
+        margin-top: 0; /* its spacing is inside, so it collapses too */
+      }
+      .collapsible {
+        display: grid;
+        grid-template-rows: 1fr;
+        opacity: 1;
+        transition:
+          grid-template-rows var(--duration-slow) var(--ease-decelerate),
+          opacity var(--duration-normal) var(--ease-decelerate);
+      }
+      .collapsible .options {
+        margin-top: var(--space-s);
+      }
+      .collapsible > div {
+        min-height: 0;
+        overflow: hidden;
+      }
+      /* Ease out after the settle delay once connected; back in at once. */
+      .collapsible[data-open='false'] {
+        grid-template-rows: 0fr;
+        opacity: 0;
+        transition-timing-function: var(--ease-accelerate);
+        transition-delay: var(--delay-settle);
+      }
+      /* The outline is an inset shadow rather than a border, so the panel
+         stays on the grid: 4 + 32 + 4 = 40. */
+      .options {
+        padding: var(--space-xs) var(--space-s);
+        gap: var(--space-xs) var(--space-l);
+        border-radius: var(--radius-control);
+        box-shadow: inset 0 0 0 var(--stroke-thin) var(--stroke);
+        background: var(--surface-subtle);
+      }
+      .options label {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-s);
+        color: var(--text-muted);
+      }
+      .options .icon-button {
+        margin-left: auto;
+      }
+
+      /* ---- Status pills -------------------------------------------------- */
+      .pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-xs);
+      }
+      .pills:empty {
+        display: none;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-xs);
+        box-sizing: border-box;
+        height: var(--size-pill);
+        padding: 0 var(--space-s);
+        border: var(--stroke-thin) solid var(--stroke);
+        border-radius: var(--radius-pill);
+        background: var(--surface);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .pill b {
+        color: var(--text-muted);
+        font-weight: var(--weight-strong);
+      }
+      .pill b:empty,
+      .pill span:empty {
+        display: none;
+      }
+      /* The people here: just their names, after a presence dot. */
+      .pill[data-key='people']::before {
+        content: '';
+        width: var(--size-dot);
+        height: var(--size-dot);
+        border-radius: 50%;
+        background: var(--ping-4);
+      }
+      .pill[data-tone='error'] {
+        color: var(--error);
+        background: var(--error-bg);
+        border-color: var(--error-stroke);
+      }
+      .pill[data-tone] b {
+        color: inherit;
+      }
+      /* Path pills ease in on a change, dwell, then ease out and collapse. */
+      .pill.transient {
+        overflow: hidden;
+        animation: pill-dwell var(--duration-dwell) both;
+      }
+      @keyframes pill-dwell {
+        0% {
+          opacity: 0;
+          max-width: 0;
+          padding-inline: 0;
+          border-color: transparent;
+          animation-timing-function: var(--ease-decelerate);
+        }
+        10% {
+          opacity: 1;
+          max-width: calc(var(--grid) * 50);
+          padding-inline: var(--space-s);
+          border-color: var(--stroke);
+        }
+        85% {
+          opacity: 1;
+          max-width: calc(var(--grid) * 50);
+          padding-inline: var(--space-s);
+          border-color: var(--stroke);
+          animation-timing-function: var(--ease-accelerate);
+        }
+        100% {
+          opacity: 0;
+          max-width: 0;
+          padding-inline: 0;
+          border-color: transparent;
+        }
+      }
+
+      /* ---- Ping chip ------------------------------------------------------ */
+      .ping {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-s);
+        box-sizing: border-box;
+        height: var(--size-control);
+        padding: 0 var(--space-m);
+        border: var(--stroke-thin) solid var(--stroke);
+        border-radius: var(--radius-control);
+        background: var(--surface);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        cursor: help;
+        --ping: var(--ping-off);
+      }
+      .ping[hidden] {
+        display: none;
+      }
+      .ping[data-level='4'] {
+        --ping: var(--ping-4);
+      }
+      .ping[data-level='3'] {
+        --ping: var(--ping-3);
+      }
+      .ping[data-level='2'] {
+        --ping: var(--ping-2);
+      }
+      .ping[data-level='1'] {
+        --ping: var(--ping-1);
+      }
+      .ping .bars {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: calc(var(--grid) / 2);
+        height: var(--size-bars);
+      }
+      .ping .bars i {
+        width: var(--size-bar);
+        border-radius: var(--radius-bar);
+        background: var(--ping-off);
+        transition: background-color var(--duration-normal) var(--ease-easy);
+      }
+      .ping .bars i:nth-child(1) {
+        height: calc(var(--size-bars) / 4);
+      }
+      .ping .bars i:nth-child(2) {
+        height: calc(var(--size-bars) / 2);
+      }
+      .ping .bars i:nth-child(3) {
+        height: calc(var(--size-bars) * 3 / 4);
+      }
+      .ping .bars i:nth-child(4) {
+        height: var(--size-bars);
+      }
+      .ping[data-level='1'] .bars i:nth-child(-n + 1),
+      .ping[data-level='2'] .bars i:nth-child(-n + 2),
+      .ping[data-level='3'] .bars i:nth-child(-n + 3),
+      .ping[data-level='4'] .bars i {
+        background: var(--ping);
+      }
+      /* Which round trip the chip shows: WebRTC (direct) or Relay. */
+      .ping .via {
+        color: var(--text-muted);
+      }
+      .ping .ms {
+        min-width: calc(var(--grid) * 10);
+      }
+      .ping[data-level='0'] .ms {
+        color: var(--text-muted);
+      }
+      .ping[data-tone='error'] .ms {
+        color: var(--error);
+      }
+
+      /* ---- Ping tooltip (top layer; placed by pingTooltip.ts) ----------- */
+      .tip {
+        position: fixed;
+        inset: auto;
+        top: calc(var(--anchor-bottom) + var(--space-xs));
+        left: clamp(
+          var(--space-s),
+          calc(var(--anchor-right) - var(--tip-width)),
+          calc(100% - var(--space-s) - var(--tip-width))
+        );
+        box-sizing: border-box;
+        width: max-content;
+        max-width: min(var(--size-tip), calc(100% - var(--space-l)));
+        margin: 0;
+        padding: var(--space-s) var(--space-m);
+        overflow: visible;
+        border: var(--stroke-thin) solid var(--stroke);
+        border-radius: var(--radius-control);
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: var(--shadow-16);
+        font-variant-numeric: tabular-nums;
+        transition:
+          opacity var(--duration-fast) var(--ease-decelerate),
+          transform var(--duration-fast) var(--ease-decelerate);
+      }
+      .tip[data-side='above'] {
+        top: calc(var(--anchor-top) - var(--space-xs) - var(--tip-height));
+      }
+      @starting-style {
+        .tip:popover-open {
+          opacity: 0;
+          transform: translateY(calc(var(--space-xs) * -1));
+        }
+      }
+      .tip p,
+      .tip dl,
+      .tip dd {
+        margin: 0;
+      }
+      .tip-value {
+        font-weight: var(--weight-strong);
+      }
+      .tip-sub,
+      .tip-note,
+      .tip dt {
+        color: var(--text-muted);
+      }
+      .tip-section {
+        margin-top: var(--space-s);
+        padding-top: var(--space-s);
+        box-shadow: inset 0 var(--stroke-thin) 0 var(--stroke);
+      }
+      .tip-title {
+        font-weight: var(--weight-strong);
+      }
+      .tip-rows {
+        display: grid;
+        grid-template-columns: var(--size-tip-label) minmax(0, 1fr);
+        column-gap: var(--space-s);
+      }
+      /* A value wraps only between its runs (before " · ", "over", " ↔ ");
+         a run wider than the column, such as a long IPv6 address, still
+         breaks rather than overflowing. */
+      .tip .run {
+        display: inline-block;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+      .tip-note {
+        margin-top: var(--space-s);
+      }
+
+      /* ---- Board --------------------------------------------------------- */
+      @property --edge-angle {
+        syntax: '<angle>';
+        inherits: true;
+        initial-value: 210deg;
+      }
+      @property --edge-alpha {
+        syntax: '<number>';
+        inherits: true;
+        initial-value: 0.25;
+      }
+      .board-wrap {
+        position: relative;
+        margin-top: var(--space-m);
+        border-radius: var(--radius-board);
+        box-shadow: var(--shadow-0);
+        transition: box-shadow var(--duration-slow) var(--ease-easy);
+      }
+      /* Elevation: 0 disconnected, 2 in a session alone, 4 with others. */
+      .board-wrap[data-elevation='2'] {
+        box-shadow: var(--shadow-2);
+      }
+      .board-wrap[data-elevation='4'] {
+        box-shadow: var(--shadow-4);
+      }
+      #board {
+        position: relative;
+        display: block;
+        width: 100%;
+        height: auto;
+        box-sizing: border-box;
+        border: var(--stroke-thin) solid transparent;
+        border-radius: var(--radius-board);
+        background: var(--surface-board);
+        cursor: crosshair;
+      }
+      /* The resting stroke. */
+      .board-wrap::before,
+      .board-wrap::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        box-sizing: border-box;
+        border-radius: var(--radius-board);
+        pointer-events: none;
+      }
+      .board-wrap::before {
+        border: var(--stroke-thin) solid var(--stroke);
+      }
+      /* The chaser: a conic gradient masked to a 2 px band that follows the
+         board's corner radius (the mask's content box keeps the inner curve). */
+      .board-wrap::after {
+        padding: var(--stroke-thick);
+        background: conic-gradient(
+          from var(--edge-angle),
+          rgb(var(--brand-rgb) / 0) 0deg,
+          rgb(var(--brand-rgb) / var(--edge-alpha)) 28deg,
+          rgb(var(--accent-rgb) / var(--edge-alpha)) 44deg,
+          rgb(var(--accent-rgb) / 0) 72deg,
+          rgb(var(--accent-rgb) / 0) 360deg
+        );
+        -webkit-mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+          linear-gradient(#000 0 0) content-box exclude,
+          linear-gradient(#000 0 0);
+      }
+
+      /* Join and leave announcements over the top of the board. */
+      #announce {
+        position: absolute;
+        top: var(--space-m);
+        left: 50%;
+        z-index: 2;
+        max-width: calc(100% - var(--space-l) * 2);
+        padding: var(--space-xs) var(--space-m);
+        border-radius: var(--radius-control);
+        background: var(--surface-toast);
+        color: var(--text-on-strong);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+        opacity: 0;
+        transform: translate(-50%, calc(var(--space-s) * -1));
+      }
+      #announce.show {
+        animation: announce var(--duration-announce) both;
+      }
+      @keyframes announce {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, calc(var(--space-s) * -1));
+          animation-timing-function: var(--ease-decelerate);
+        }
+        12% {
+          opacity: 1;
+          transform: translate(-50%, 0);
+        }
+        84% {
+          opacity: 1;
+          transform: translate(-50%, 0);
+          animation-timing-function: var(--ease-accelerate);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, calc(var(--space-xs) * -1));
+        }
+      }
+
+      /* ---- Raw state side panel ----------------------------------------- */
+      #raw {
+        inset: var(--space-m) var(--space-m) var(--space-m) auto;
+        width: min(var(--size-panel), calc(100vw - var(--space-m) * 2));
+        height: auto;
+        margin: 0;
+        padding: 0;
+        border: var(--stroke-thin) solid var(--stroke);
+        border-radius: var(--radius-control);
+        background: var(--surface);
+        box-shadow: var(--shadow-16);
+        overflow: hidden;
+      }
+      #raw:popover-open {
+        display: flex;
+        flex-direction: column;
+      }
+      #raw header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-m);
+        box-shadow: inset 0 calc(var(--stroke-thin) * -1) 0 var(--stroke);
+        color: var(--text-muted);
+      }
+      #raw header .icon-button {
+        font-family: system-ui, sans-serif;
+        font-size: var(--font-title);
+      }
+      #raw pre {
+        flex: 1;
+        margin: 0;
+        padding: var(--space-m);
+        overflow: auto;
+        font-size: var(--font-small);
+        line-height: var(--line-small);
+        background: var(--surface-subtle);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .toggle.nudge {
+          animation: none;
+          outline: var(--stroke-thick) solid var(--brand);
+          outline-offset: var(--stroke-thick);
+        }
+        .collapsible,
+        .collapsible[data-open='false'] {
+          transition-property: opacity;
+        }
+        /* Same states, no movement: the tooltip and the copy confirmation
+           appear and revert without easing. */
+        .tip,
+        .code-copy,
+        .code-copy-hint,
+        .code-copy-icon svg {
+          transition: none;
+        }
+        .code-copy[data-state='copied'] .icon-check path {
+          animation: none;
+        }
+        @keyframes announce {
+          0%,
+          100% {
+            opacity: 0;
+            transform: translate(-50%, 0);
+          }
+          8%,
+          88% {
+            opacity: 1;
+            transform: translate(-50%, 0);
+          }
+        }
+        @keyframes pill-dwell {
+          0%,
+          100% {
+            opacity: 0;
+          }
+          8%,
+          90% {
+            opacity: 1;
+          }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Collab Whiteboard</h1>
+
+      <div class="row">
+        <input
+          id="opt-name"
+          aria-label="Your name"
+          maxlength="40"
+          placeholder="Your name"
+          autocomplete="nickname"
+        />
+        <div id="mode" class="toggle" role="group" aria-label="Host or join">
+          <button id="host" type="button" aria-pressed="false">Host</button>
+          <button id="join" type="button" aria-pressed="true">Join</button>
+        </div>
+        <input
+          id="code"
+          aria-label="Session code"
+          placeholder="Ask host for their three-word-code to join."
+          spellcheck="false"
+          autocomplete="off"
+          enterkeyhint="go"
+        />
+        <button
+          id="code-copy"
+          class="code-copy"
+          type="button"
+          data-state="idle"
+          hidden
+        >
+          <span class="code-copy-text"></span>
+          <span class="code-copy-hint" aria-hidden="true">
+            <span class="code-copy-icon">
+              <svg class="icon-copy" viewBox="0 0 16 16" stroke-width="1.5">
+                <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+                <path
+                  d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5"
+                />
+              </svg>
+              <svg class="icon-check" viewBox="0 0 16 16" stroke-width="2">
+                <path d="M3.5 8.5l3 3 6-7" />
+              </svg>
+              <svg class="icon-error" viewBox="0 0 16 16" stroke-width="2">
+                <path d="M8 4v5M8 12v.01" />
+              </svg>
+            </span>
+            <span class="code-copy-label">Copy</span>
+          </span>
+        </button>
+        <span
+          id="ping"
+          class="ping"
+          role="img"
+          tabindex="0"
+          aria-describedby="ping-tip"
+          hidden
+        >
+          <span class="bars" aria-hidden="true"
+            ><i></i><i></i><i></i><i></i
+          ></span>
+          <span class="via"></span>
+          <span class="ms"></span>
+        </span>
+        <div id="ping-tip" class="tip" role="tooltip" popover="manual"></div>
+      </div>
+
+      <div id="options" class="collapsible" data-open="true">
+        <div>
+          <div class="row options">
+            <label
+              title="Signalling only keeps board data off the relay; it then only carries the setup for a direct connection."
+            >
+              Relay
+              <select id="opt-relay">
+                <option value="allow">Allow board data</option>
+                <option value="deny">Signalling only</option>
+              </select>
+            </label>
+            <label
+              title="Upgrade to direct uses the addresses the browser offers by default. Direct on this network also asks for microphone permission (released at once, nothing recorded), which lets the browser offer its LAN addresses, for two people on the same network or VPN. Blocked forces ICE to relay-only with no TURN servers, which simulates a network that blocks UDP."
+            >
+              WebRTC
+              <select id="opt-rtc">
+                <option value="on">Upgrade to direct</option>
+                <option value="lan">
+                  Direct on this network (asks for mic access)
+                </option>
+                <option value="off">Off</option>
+                <option value="blocked">Blocked (simulate no UDP)</option>
+              </select>
+            </label>
+            <button
+              id="raw-toggle"
+              class="icon-button"
+              type="button"
+              popovertarget="raw"
+              aria-controls="raw"
+              aria-expanded="false"
+              aria-label="Raw state"
+              title="Raw state"
+            >
+              { }
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="chips" class="pills" aria-live="polite"></div>
+
+      <div class="board-wrap">
+        <canvas
+          id="board"
+          width="880"
+          height="520"
+          aria-label="Shared board"
+        ></canvas>
+        <div id="announce" role="status" aria-live="polite"></div>
+      </div>
+      <div id="raw" popover aria-label="Raw state">
+        <header>
+          Raw state
+          <button
+            class="icon-button"
+            type="button"
+            popovertarget="raw"
+            popovertargetaction="hide"
+            aria-label="Close raw state"
+          >
+            ×
+          </button>
+        </header>
+        <pre id="state"></pre>
+      </div>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

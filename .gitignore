@@ -1,0 +1,17 @@
+node_modules/
+.turbo/
+.DS_Store
+
+# Generated application and package output
+apps/*/dist/
+apps/*/bin/
+packages/*/dist/
+coverage/
+
+# Local test and browser artifacts
+.screenshots/
+test-results/
+playwright-report/
+
+# Agent worktrees
+.claude/worktrees/

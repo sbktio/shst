@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Every TypeScript project in the workspace extends a variant of this, never this
+  // file alone: the variants set module resolution, libraries and ambient types.
+  // TypeScript only checks here. Node, Bun and Vite run the source as written.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "noEmit": true,
+    "skipLibCheck": true,
+    // Every file is a module, whatever it imports or exports.
+    "moduleDetection": "force",
+    // Don't search node_modules for @typescript/lib-* replacement packages; we use none.
+    "libReplacement": false,
+
+    "strict": true,
+    // Implied by strict; spelled out so the catch-clause contract is visible.
+    "useUnknownInCatchVariables": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    // noPropertyAccessFromIndexSignature is off. With noUncheckedIndexedAccess on, a
+    // dotted read through an index signature is already typed `T | undefined` (or
+    // `unknown`), so the flag only demands `x['key']` spelling: none of its 393 hits
+    // was a bug. It also can't pass in orgdb, whose @emu/kit dependency is TypeScript
+    // source that tsc checks under the consumer's options (48 of those hits).
+    "noPropertyAccessFromIndexSignature": false,
+    // Unreachable code and unused labels are errors rather than editor hints.
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    // A side-effect import (`import './x.ts'`) must resolve, so a typo can't hide.
+    "noUncheckedSideEffectImports": true,
+    // Unused code is an error. It only runs in `typecheck`, never in `dev` or `test`,
+    // so a half-finished edit still runs; editors flag it as you type, and it keeps
+    // dead imports and helpers from surviving review. Name a parameter you must accept
+    // but don't use with a leading `_`.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // Each file must compile on its own, as Node's type stripping, Bun and Vite do.
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

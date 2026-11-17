@@ -1,0 +1,8 @@
+{
+  "extends": "@shst/tsconfig/node.json",
+  "compilerOptions": {
+    // The source also runs in the browser tab: WebRTC and the wasm loader's <script>.
+    "lib": ["ES2024", "DOM"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
