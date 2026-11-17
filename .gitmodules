@@ -1,0 +1,3 @@
+[submodule "tailcat"]
+	path = package/tailcat
+	url = https://github.com/sbktio/tailcat.git
