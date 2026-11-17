@@ -6,9 +6,11 @@ another types the code to join. There is no API server: the host tab runs the
 whiteboard service in memory, and nothing is kept in browser storage, so a
 board lasts as long as the host tab.
 
-Built from two packages: `@shst/whiteboard` (document model,
-operations, in-memory service) and `@shst/tailcat-transport`
-(Tailcat session, RPC, WebRTC upgrade).
+Built from three packages: `@shst/whiteboard` (document model,
+operations, in-memory service), `@shst/tailcat-transport`
+(Tailcat session, RPC, WebRTC upgrade) and
+`@shst/whiteboard-tailcat` (the whiteboard's live-session
+protocol over that transport).
 
 ## Run
 

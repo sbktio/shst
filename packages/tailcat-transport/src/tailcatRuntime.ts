@@ -1,8 +1,8 @@
 import type { ByteStream } from './frames.ts';
 
 /**
- * Loads the qbtailcat js/wasm build (apps/web/tests/tailcat-transport/
- * qbtailcat, a thin Go wrapper over tailscale/tailcat) and types its globals.
+ * Loads the qbtailcat js/wasm build (`qbtailcat/` in this package, a thin Go
+ * wrapper over tailscale/tailcat) and types its globals.
  *
  * The wrapper adds two things tailcat's own browser build lacks:
  *   - three-word session codes, from which both sides derive the host's
@@ -25,7 +25,6 @@ export interface TailcatPath {
 }
 
 export interface TailcatConn extends ByteStream {
-  readonly port: number;
   closeWrite(): Promise<void>;
   /** The path as of the last check (re-checked every few seconds). */
   path(): TailcatPath;
@@ -60,7 +59,7 @@ export interface TailcatRuntime {
     onConnection: (conn: TailcatConn) => void;
     onRefused?: (path: TailcatPath) => void;
     derpMapURL?: string;
-    port?: number;
+    port: number;
     verbose?: boolean;
   }): Promise<TailcatHostSession>;
   join(options: {
@@ -68,7 +67,7 @@ export interface TailcatRuntime {
     allowRelay: boolean;
     directTimeoutMs?: number;
     derpMapURL?: string;
-    port?: number;
+    port: number;
     verbose?: boolean;
   }): Promise<{ conn: TailcatConn; timings: TailcatJoinTimings }>;
 }
@@ -112,7 +111,6 @@ function asConn(value: unknown): TailcatConn {
   const path = value.path as () => unknown;
   const closeReason = value.closeReason as () => unknown;
   return {
-    port: typeof value.port === 'number' ? value.port : 0,
     read: async (): Promise<Uint8Array | null> => {
       const chunk = await read();
       if (chunk === null || chunk instanceof Uint8Array) return chunk;
@@ -176,7 +174,7 @@ export function loadTailcatRuntime(baseUrl: string): Promise<TailcatRuntime> {
         onConnection,
         onRefused,
         derpMapURL = TAILCAT_DERP_MAP_URL,
-        port = 7187,
+        port,
         verbose = false,
       }): Promise<TailcatHostSession> => {
         const result: unknown = await host({
@@ -213,7 +211,7 @@ export function loadTailcatRuntime(baseUrl: string): Promise<TailcatRuntime> {
         allowRelay,
         directTimeoutMs = 15000,
         derpMapURL = TAILCAT_DERP_MAP_URL,
-        port = 7187,
+        port,
         verbose = false,
       }): Promise<{ conn: TailcatConn; timings: TailcatJoinTimings }> => {
         const result: unknown = await join({

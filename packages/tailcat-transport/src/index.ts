@@ -4,6 +4,4 @@ export * from './rpc.ts';
 export * from './rtcDiagnostics.ts';
 export * from './rtcStream.ts';
 export * from './rtcUpgrade.ts';
-export * from './syncPacing.ts';
 export * from './tailcatRuntime.ts';
-export * from './tailcatWhiteboardApi.ts';

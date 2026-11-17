@@ -22,7 +22,7 @@ import type { ByteStream } from './frames.ts';
  */
 
 /**
- * STUN only reports each side's public address; it never sees board data.
+ * STUN only reports each side's public address; it never sees application data.
  * Tailcat's relay nodes do not answer STUN (tested: no reply on 3478), so
  * these are public servers. Self-host one to avoid any third party here.
  */
@@ -32,6 +32,8 @@ export const RTC_STUN_URLS = [
 ];
 
 export interface RtcOptions {
+  /** The data channel label. Both sides must pass the same one. */
+  channelLabel: string;
   /** Defaults to RTC_STUN_URLS. */
   stunUrls?: string[];
   /**
@@ -315,7 +317,7 @@ function narrate(
  */
 export async function offerDirectSession(
   signal: (offer: RtcSignal) => Promise<RtcSignal>,
-  options: RtcOptions = {}
+  options: RtcOptions
 ): Promise<RtcSession & { timings: RtcTimings }> {
   const log = options.log ?? ((): void => undefined);
   const pc = newPeerConnection(options);
@@ -323,7 +325,9 @@ export async function offerDirectSession(
   let answerSdp = '';
   const reportFailure = narrate(pc, log, () => answerSdp);
   try {
-    const channel = pc.createDataChannel('whiteboard', { ordered: true });
+    const channel = pc.createDataChannel(options.channelLabel, {
+      ordered: true,
+    });
     let mark = performance.now();
     await pc.setLocalDescription(await pc.createOffer());
     await gathered(pc, options.gatherTimeoutMs ?? 3000);
@@ -376,7 +380,7 @@ export async function offerDirectSession(
 export async function answerDirectSession(
   offer: unknown,
   onSession: (session: RtcSession) => void,
-  options: RtcOptions = {}
+  options: RtcOptions
 ): Promise<RtcSignal> {
   if (
     typeof offer !== 'object' ||
@@ -405,7 +409,7 @@ export async function answerDirectSession(
   );
   pc.addEventListener('datachannel', (event) => {
     const channel = event.channel;
-    if (channel.label !== 'whiteboard') {
+    if (channel.label !== options.channelLabel) {
       channel.close();
       return;
     }
