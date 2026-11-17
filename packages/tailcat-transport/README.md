@@ -22,7 +22,8 @@ exercised against the network in CI; the unit tests use in-memory pipes.
 | `src/rtcUpgrade.ts`     | WebRTC offer/answer signalled over the Tailcat session        |
 | `src/rtcStream.ts`      | RTCDataChannel as a byte stream, with backpressure            |
 | `src/rtcDiagnostics.ts` | Candidate and pair narration, plain-language failure verdicts |
-| `qbtailcat/`            | Go wrapper over Tailcat: word codes, relay policy, wasm + CLI |
+| `qbtailcat/session/`    | Go library: word codes, relay policy, sessions, drain         |
+| `qbtailcat/cmd/wasm/`   | The browser build of the library, behind `qbTailcatHost/Join` |
 
 TypeScript source is the package entry point; there is no build step for it.
 
@@ -32,17 +33,21 @@ The caller owns the application protocol, so it passes the virtual Tailcat
 
 ## Build the wasm
 
-Requires Go 1.27 or later. The wrapper pins `github.com/tailscale/tailcat`
-v0.7.0 in `qbtailcat/go.mod`.
+Requires Go 1.27 or later. `qbtailcat/go.mod` replaces
+`github.com/tailscale/tailcat` with the
+[sbktio/tailcat](https://github.com/sbktio/tailcat) fork at a pinned commit,
+verified by `go.sum`. The fork keeps the upstream module path and exports
+`Server.PeerKey`, which the host uses to find a peer's path. The pin names
+the same commit as the `package/tailcat` submodule, and
+`pnpm tailcat:check` (part of `pnpm validate`) fails if they drift.
 
 ```sh
 pnpm --filter @shst/tailcat-transport build:wasm
 pnpm --filter @shst/tailcat-transport test:go
 ```
 
-The script writes `main.wasm`, a gzip copy, `wasm_exec.js` and a native
-`bin/qbtailcat` to `dist/`, which is git-ignored. `apps/whiteboard` serves the
-wasm from there.
+The script writes `main.wasm`, a gzip copy and `wasm_exec.js` to `dist/`,
+which is git-ignored. `apps/whiteboard` serves the wasm from there.
 
 ## Test
 
@@ -149,10 +154,12 @@ same-machine runs; `SPIKE_MDNS=1` keeps Chrome's default hiding.
 
 ## Native CLI
 
-Native relay experiments, which can hold a direct path:
+Native programs import `github.com/sbktio/shst/packages/tailcat-transport/qbtailcat/session`. The
+[`shst`](../../apps/shst) CLI is one, and it runs the native relay experiments
+that a browser cannot, since a browser can never hold a direct path:
 
 ```sh
-packages/tailcat-transport/dist/bin/qbtailcat host [-deny-relay]
-packages/tailcat-transport/dist/bin/qbtailcat join [-deny-relay] word word word
-TS_DEBUG_NEVER_DIRECT_UDP=1 packages/tailcat-transport/dist/bin/qbtailcat join ...   # simulate blocked UDP
+shst echo [--deny-relay]
+shst ping [--deny-relay] word word word
+TS_DEBUG_NEVER_DIRECT_UDP=1 shst ping ...   # simulate blocked UDP
 ```

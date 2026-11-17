@@ -1,8 +1,11 @@
 # shst
 
 A pnpm and Turborepo workspace for the collaborative whiteboard, its document
-model, and the Tailcat transport with a WebRTC direct-path upgrade. The
-repository also pins the full Tailcat source as a Git submodule.
+model, the Tailcat transport with a WebRTC direct-path upgrade, and `shst`, a
+command-line tool that pipes bytes between two machines over the same
+transport. The repository also pins the full Tailcat source as a Git
+submodule. The Go modules pin the same fork commit, and `pnpm validate`
+checks that the two agree.
 
 ## Clone
 
@@ -21,11 +24,19 @@ git submodule update --init --recursive
 
 ## Workspace
 
-- `apps/whiteboard` — Vite whiteboard application
-- `packages/whiteboard` — whiteboard document model, operations, and in-memory service
-- `packages/tailcat-transport` — Tailcat relay transport, WebRTC upgrade, and Go-to-Wasm bridge
-- `packages/tsconfig` — shared strict TypeScript configuration
-- `package/tailcat` — pinned source from the [`sbktio/tailcat`](https://github.com/sbktio/tailcat) fork
+The transport knows nothing about the whiteboard. Dependencies point one way:
+the apps use the protocol and transport packages, and the protocol package
+uses the transport and the document model.
+
+| Path | What it is |
+| --- | --- |
+| `apps/whiteboard` | Vite whiteboard application |
+| `apps/shst` | Cobra CLI for pipes, echo and round-trip checks over Tailcat |
+| `packages/whiteboard` | Whiteboard document model, operations, and in-memory service |
+| `packages/whiteboard-tailcat` | The whiteboard's protocol over the transport: handshake, RPC API, sync pacing |
+| `packages/tailcat-transport` | Byte streams over Tailcat, frames, RPC, WebRTC upgrade, and the Go session library with its wasm build |
+| `packages/tsconfig` | Shared strict TypeScript configuration |
+| `package/tailcat` | Pinned source from the [`sbktio/tailcat`](https://github.com/sbktio/tailcat) fork |
 
 ## macOS prerequisites
 
@@ -128,6 +139,21 @@ Claude Code also exposes it as `/whiteboard-demo`. The canonical workflow is in
 Agents should run `demo:stop` when their task is finished so no background demo
 process remains.
 
+## Use the shst CLI
+
+Build it, then run one side on each machine:
+
+```sh
+mise exec -- pnpm --filter @shst/cli build
+apps/shst/bin/shst host < notes.tar        # prints a three-word code
+apps/shst/bin/shst join <code> > notes.tar # on the other machine
+```
+
+`shst echo` and `shst ping <code>` measure a link. See
+`apps/shst/README.md` for more, and run
+`mise exec -- pnpm --filter @shst/cli test:live` to check it
+end to end over the public relays.
+
 ## Checks
 
 ```sh
@@ -135,7 +161,7 @@ process remains.
 mise exec -- pnpm typecheck
 mise exec -- pnpm test
 
-# Run the Go tests for the transport wrapper.
+# Run the Go tests for the session library and the shst CLI.
 mise exec -- pnpm test:go
 
 # Run all checks and build the static application.
