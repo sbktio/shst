@@ -1,0 +1,20 @@
+{
+  "name": "@shst/whiteboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Whiteboard document model, operations and an in-memory service. No runtime dependencies; runs in Node and the browser.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@shst/tsconfig": "workspace:*",
+    "@types/node": "24.19.1",
+    "typescript": "5.9.3"
+  }
+}

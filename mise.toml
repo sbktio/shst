@@ -1,0 +1,17 @@
+min_version = "2026.1.0"
+
+[settings]
+auto_install = false
+
+[tools]
+node = "22.23.4"
+pnpm = "12.18.0"
+go = "1.27.4"
+
+[tasks.dev]
+description = "Build Tailcat wasm and start the whiteboard"
+run = "pnpm dev"
+
+[tasks.validate]
+description = "Typecheck, test, and build the workspace"
+run = "pnpm validate"
