@@ -1,5 +1,5 @@
-// Builds the qbtailcat wrapper: the browser wasm (plus Go's wasm_exec.js and a
-// gzip copy for the dev server) and a native binary for relay experiments.
+// Builds the qbtailcat browser wasm (./cmd/wasm), plus Go's wasm_exec.js and a
+// gzip copy for the dev server.
 // Output goes to packages/tailcat-transport/dist, which is git-ignored.
 // Requires Go 1.27+.
 //
@@ -14,7 +14,7 @@ import { gzipSync } from 'node:zlib';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const moduleDir = path.resolve(here, '../qbtailcat');
 const out = path.resolve(here, '../dist');
-mkdirSync(path.join(out, 'bin'), { recursive: true });
+mkdirSync(out, { recursive: true });
 
 const go = (args, env = {}) =>
   execFileSync('go', args, {
@@ -33,7 +33,7 @@ go(
     '-ldflags=-s -w',
     '-o',
     path.join(out, 'main.wasm'),
-    '.',
+    './cmd/wasm',
   ],
   {
     GOOS: 'js',
@@ -47,9 +47,8 @@ copyFileSync(
 );
 const wasm = readFileSync(path.join(out, 'main.wasm'));
 writeFileSync(path.join(out, 'main.wasm.gz'), gzipSync(wasm, { level: 9 }));
-go(['build', '-o', path.join(out, 'bin', 'qbtailcat'), '.']);
 
 const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 process.stdout.write(
-  `built ${out}: main.wasm ${mb(wasm.length)} (gzip ${mb(gzipSync(wasm, { level: 9 }).length)}), bin/qbtailcat\n`
+  `built ${out}: main.wasm ${mb(wasm.length)} (gzip ${mb(gzipSync(wasm, { level: 9 }).length)})\n`
 );

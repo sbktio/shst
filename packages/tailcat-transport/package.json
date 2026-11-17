@@ -11,7 +11,7 @@
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
     "test": "node --test 'test/**/*.test.ts'",
-    "test:go": "cd qbtailcat && go test .",
+    "test:go": "cd qbtailcat && go test ./...",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
