@@ -68,7 +68,9 @@ const codeWordCount = 3
 var codeRegions = []tailcfg.DERPRegionID{301, 302, 303, 304}
 
 // codeVersion is mixed into every derivation so a future scheme cannot
-// collide with this one.
+// collide with this one. It is a frozen wire value shared by every program
+// that uses these codes, not product coupling. Changing it stops new joiners
+// from reaching hosts that already deployed it.
 const codeVersion = "shst live session code v1"
 
 // parseCode accepts words separated by spaces, hyphens, dots or commas, in

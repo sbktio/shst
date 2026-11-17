@@ -6,6 +6,7 @@ require (
 	github.com/tailscale/tailcat v0.7.0
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745
 	golang.org/x/crypto v0.59.0
+	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
 	tailscale.com v1.105.0-pre.0.20261117025509-46ad4538b701
 )
 
@@ -54,7 +55,6 @@ require (
 	golang.org/x/time v0.16.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v1.0.1 // indirect
-	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72 // indirect
 )
 
 replace github.com/tailscale/tailcat => github.com/sbktio/tailcat v0.0.0-20261117050221-3f67a5497db3
