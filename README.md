@@ -149,7 +149,9 @@ apps/shst/bin/shst host < notes.tar        # prints a three-word code
 apps/shst/bin/shst join <code> > notes.tar # on the other machine
 ```
 
-`shst echo` and `shst ping <code>` measure a link. See
+`shst echo` and `shst ping <code>` measure a link. `shst host --addressing address`
+shares a raw Tailcat address instead of three words, for anything a guessable
+code should not protect, and `--qr` prints the code or address as a QR code. See
 `apps/shst/README.md` for more, and run
 `mise exec -- pnpm --filter @shst/cli test:live` to check it
 end to end over the public relays.

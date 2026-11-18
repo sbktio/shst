@@ -83,7 +83,7 @@ func TestLiveEchoPing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	h, err := startEcho(ctx, portEcho, false, io.Discard)
+	h, err := startEcho(ctx, portEcho, false, nil, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

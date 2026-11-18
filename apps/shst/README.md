@@ -1,8 +1,8 @@
 # shst
 
 shst pipes bytes between two machines over Tailcat. It is a small Unix tool
-in the spirit of pipe.pico.sh. One side prints a three-word code. The other
-side joins with it. Stdin goes one way and stdout comes out the other.
+in the spirit of pipe.pico.sh. One side prints a three-word code, or a raw
+Tailcat address. The other side joins with it. Stdin goes one way and stdout comes out the other.
 
 Data goes to stdout. Status goes to stderr. Pipes stay clean.
 
@@ -28,7 +28,9 @@ end to end over the public relays, run
 3 MB each way between two processes, checks a joiner whose stdin is a
 terminal, pings an echo host, and confirms `--deny-relay` refuses a relayed
 session. It also checks that a second joiner is refused and that interrupts
-set the exit status.
+set the exit status. It sends a file both ways with a raw address, pings an
+echo host that uses one, and checks interop with the upstream `tailcat` CLI
+when `package/tailcat` can be built. Otherwise it prints a skip line.
 
 ## Send a file
 
@@ -63,6 +65,93 @@ done.
 A host takes one peer. A second joiner is refused. Its `shst join` exits 1
 with "the host refused the session". The same message appears when the code
 is right but the host is not serving that port.
+
+## Raw Tailcat addresses
+
+Use a raw address for anything sensitive. Three words are easy to say and
+type, but they are guessable in principle. A raw address carries random
+full-strength keys and a pre-shared key, so it is not.
+
+```sh
+shst host --addressing address < secrets.tar
+```
+
+Host prints the address as its code, about 154 characters starting with `tc`.
+
+```
+code: tc...
+join with: shst join tc...
+addressing: address
+```
+
+With the default three-word addressing there is no `addressing:` line.
+
+On the receiver, pass the printed address. Join tells an address from a
+three-word code by itself, so it needs no flag.
+
+```sh
+shst join tc... > secrets.tar
+```
+
+`echo` takes the same flag, and `ping` also accepts an address.
+
+The address is a secret, just like a code. Passing it as `shst join <address>`
+puts it in the process list and in your shell history. `--qr` shows it to any
+camera or screen recording. For now, type it in a shell with history turned
+off, or set `HISTCONTROL=ignorespace` and start the command with a space. A
+way to pass it without putting it in argv is a planned follow-up.
+
+## QR codes
+
+`--qr` prints a QR code of exactly the text a joiner needs. It goes to stderr,
+before the join hint. It is handy for a long raw address that you would
+rather scan than type.
+
+```sh
+shst host --addressing address --qr < file.tar
+```
+
+The code is drawn with Unicode half blocks in explicit colours, black on
+bright white, so it scans the same on a dark or a light terminal theme. It
+has the four module quiet zone that the QR specification asks for. Use a
+terminal font that has the block characters, and make the window wide enough
+that lines do not wrap.
+
+## Configuration
+
+Configuration is flags, with environment variables as their defaults. There
+is no config file. A flag on the command line wins over its variable.
+
+| Flag | Variable | Meaning |
+| --- | --- | --- |
+| `--addressing words\|address` | `SHST_ADDRESSING` | How a joiner reaches `host` or `echo`. Defaults to `words`. |
+| `--qr` | `SHST_QR` | Print a QR code. Set the variable to a boolean such as `1` or `true` to turn it on. |
+
+`--qr=false` overrides `SHST_QR=1`. The addressing name is not case sensitive.
+An unknown addressing name, or a `SHST_QR` value that is not a boolean, is a
+usage error. For a variable it is reported when `host` or `echo` runs, and a
+flag on the command line replaces the bad value.
+
+## Interop with the tailcat CLI
+
+shst speaks the same protocol as the `tailcat` command, so the two can talk.
+
+A plain `tailcat` server accepts one connection on any port and writes it to
+stdout. It prints its address on stderr. Send a file to it with
+`shst join`.
+
+```sh
+tailcat > received.bin
+shst join <its address> < file
+```
+
+A plain `tailcat <address>` client dials port 1. To receive from it, host on
+port 1 with a raw address.
+
+```sh
+shst host --addressing address --port 1 < file
+tailcat <printed address> > received.bin
+```
 
 ## Chat
 

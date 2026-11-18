@@ -6,6 +6,7 @@ require (
 	github.com/sbktio/shst/packages/tailcat-transport/qbtailcat v0.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.48.0
+	rsc.io/qr v0.2.0
 	tailscale.com v1.105.0-pre.0.20261117025509-46ad4538b701
 )
 

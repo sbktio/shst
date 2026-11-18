@@ -33,8 +33,9 @@ func newRootCmd() *cobra.Command {
 		Long: fmt.Sprintf(`shst sends a byte stream from one machine to another. No accounts, no
 servers to run, no port forwarding.
 
-One side runs "shst host" and gets a three-word code. The other side runs
-"shst join <code>". Stdin on each side goes to the peer and the peer's bytes
+One side runs "shst host" and gets a three-word code, or a raw Tailcat
+address with --addressing address. The other side runs "shst join <code>"
+and join accepts either form. Stdin on each side goes to the peer and the peer's bytes
 come out on stdout, like netcat. Data goes to stdout. Status goes to stderr,
 so pipes stay clean.
 
@@ -46,7 +47,15 @@ Ports. Both sides must use the same port, which is part of what a code
 reaches. Pipes default to %d, echo and ping default to %d, and the
 whiteboard app uses %d, so a whiteboard code is never taken for a pipe.
 
-Environment. Set TS_DEBUG_NEVER_DIRECT_UDP=1 on either side to simulate a
+Configuration. Flags with environment fallbacks, and no config file. A flag
+on the command line wins over its variable.
+  SHST_ADDRESSING  default for --addressing on host and echo: words or
+                   address. Unset means words.
+  SHST_QR          a boolean such as 1 or true makes --qr the default on host
+                   and echo, which prints a QR code of the code or address.
+                   --qr=false overrides SHST_QR=1.
+
+Debugging. Set TS_DEBUG_NEVER_DIRECT_UDP=1 on either side to simulate a
 network that blocks direct UDP. Set TS_DEBUG_ALWAYS_USE_DERP=1 to force the
 relay.`, portPipe, portEcho, portWhiteboard),
 		SilenceUsage:      true,
