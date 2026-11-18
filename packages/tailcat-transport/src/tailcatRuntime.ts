@@ -42,14 +42,24 @@ export interface TailcatJoinTimings {
 }
 
 export interface TailcatHostSession {
-  /** Three words, hyphen-joined. Whoever holds them can join while open. */
+  /**
+   * The text a joiner needs: three hyphen-joined words, or the raw Tailcat
+   * address when `addressing` is `'address'`. Whoever holds it can join while
+   * the host is open.
+   */
   readonly code: string;
   readonly region: string;
   readonly regionId: number;
   /** Measured round trip per relay region (ms), when the browser picked. */
   readonly regionProbes: Record<string, number>;
-  /** The full tailcat address the code expands to; never needs sharing. */
+  /**
+   * The raw Tailcat address this host is reachable at. It grants the same
+   * access as `code`, so treat it as a secret. It equals `code` when
+   * `addressing` is `'address'`.
+   */
   readonly addr: string;
+  /** How joiners reach this host; `code` is the text they need in it. */
+  readonly addressing: 'words' | 'address';
   close(): void;
 }
 
@@ -60,6 +70,12 @@ export interface TailcatRuntime {
     onRefused?: (path: TailcatPath) => void;
     derpMapURL?: string;
     port: number;
+    /**
+     * What joiners type. `words` (the default) is three easy-to-type words;
+     * `address` is a raw Tailcat address with full-strength keys, too long
+     * to type but far harder to guess.
+     */
+    addressing?: 'words' | 'address';
     verbose?: boolean;
   }): Promise<TailcatHostSession>;
   join(options: {
@@ -175,6 +191,7 @@ export function loadTailcatRuntime(baseUrl: string): Promise<TailcatRuntime> {
         onRefused,
         derpMapURL = TAILCAT_DERP_MAP_URL,
         port,
+        addressing,
         verbose = false,
       }): Promise<TailcatHostSession> => {
         const result: unknown = await host({
@@ -182,6 +199,7 @@ export function loadTailcatRuntime(baseUrl: string): Promise<TailcatRuntime> {
           derpMapURL,
           port,
           verbose,
+          ...(addressing === undefined ? {} : { addressing }),
           onConnection: (conn: unknown) => onConnection(asConn(conn)),
           onRefused: (path: unknown) => onRefused?.(asPath(path)),
         });
@@ -200,6 +218,7 @@ export function loadTailcatRuntime(baseUrl: string): Promise<TailcatRuntime> {
         return {
           code: result.code,
           addr: result.addr,
+          addressing: result.addressing === 'address' ? 'address' : 'words',
           region: String(result.region ?? ''),
           regionId: Number(result.regionId ?? 0),
           regionProbes,
