@@ -9,10 +9,8 @@ import type {
   WhiteboardService,
 } from '@shst/whiteboard';
 import type { RpcHandler } from '@shst/tailcat-transport';
+import { WATCH_WAIT_MS } from '@shst/whiteboard-tailcat';
 import type { BrowserWhiteboardStore } from './browserWhiteboardStore';
-
-/** The longest a host holds a watch open; matches WATCH_WAIT_MS. */
-const MAX_WATCH_MS = 20_000;
 
 /**
  * Maps one participant's RPC calls onto the real `WhiteboardService`, with the
@@ -99,13 +97,13 @@ export function whiteboardHostHandler(
       case 'watch': {
         // Answer as soon as the board or someone else's presence differs
         // from what the watcher last saw; otherwise hold the request until
-        // something changes or MAX_WATCH_MS passes. The watcher's own cursor
+        // something changes or WATCH_WAIT_MS passes. The watcher's own cursor
         // never wakes it (it already knows where it is).
         const { revision, presenceVersion } = params;
         if (typeof revision !== 'number' || typeof presenceVersion !== 'number')
           invalid('A watch needs the last revision and presence version.');
         const self = `${actor.id}:`;
-        const deadline = Date.now() + MAX_WATCH_MS;
+        const deadline = Date.now() + WATCH_WAIT_MS;
         for (;;) {
           const board = await service.read(id);
           const version = store.presenceVersion(id, self);

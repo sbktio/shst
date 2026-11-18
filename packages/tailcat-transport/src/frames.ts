@@ -3,8 +3,8 @@
  *
  * A Tailcat connection is a TCP byte stream, so message boundaries have to be
  * carried in-band: a 4-byte big-endian length, then that many bytes of UTF-8
- * JSON. The cap sits above the API's 36 MiB board body limit so a board with
- * media can still cross in one message.
+ * JSON. The cap sits above the whiteboard's 36 MiB board body limit, its largest
+ * message, so that message still crosses in one frame.
  */
 
 /** The byte-level surface shared by Tailcat connections and test pipes. */
@@ -34,7 +34,7 @@ export type FrameResult = { done: true } | { done: false; message: unknown };
 
 /**
  * Reassembles frames from arbitrarily split chunks. Chunks are queued and
- * copied once per frame, so a large board does not cost a copy per chunk.
+ * copied once per frame, so a large message does not cost a copy per chunk.
  */
 export class FrameReader {
   private readonly chunks: Uint8Array[] = [];

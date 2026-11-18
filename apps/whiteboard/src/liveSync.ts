@@ -3,11 +3,11 @@ import {
   PRESENCE_DEADLINE_MS,
   PresencePacer,
   WATCH_DEADLINE_MS,
-} from '@shst/tailcat-transport';
+} from '@shst/whiteboard-tailcat';
 import type {
   TailcatWhiteboardApi,
   WatchSnapshot,
-} from '@shst/tailcat-transport';
+} from '@shst/whiteboard-tailcat';
 
 /**
  * Keeps one participant in sync with a live session, replacing the poll

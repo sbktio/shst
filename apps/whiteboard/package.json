@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@shst/tailcat-transport": "workspace:*",
-    "@shst/whiteboard": "workspace:*"
+    "@shst/whiteboard": "workspace:*",
+    "@shst/whiteboard-tailcat": "workspace:*"
   },
   "devDependencies": {
     "@shst/tsconfig": "workspace:*",

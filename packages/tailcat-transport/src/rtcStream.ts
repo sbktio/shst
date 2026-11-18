@@ -7,7 +7,7 @@ import type { ByteStream } from './frames.ts';
  * Data channels are message-based; frames.ts already reassembles arbitrary
  * chunks, so writes are split into small messages (well under every
  * browser's SCTP message limit) and reads hand messages through as chunks.
- * Writes wait on `bufferedAmount` so a large save stalls the writer rather
+ * Writes wait on `bufferedAmount` so a large write stalls the writer rather
  * than filling browser memory.
  */
 

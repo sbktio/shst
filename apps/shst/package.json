@@ -1,0 +1,11 @@
+{
+  "name": "@shst/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pipe bytes between two machines over Tailcat with a three-word code",
+  "scripts": {
+    "build": "go build -o bin/shst .",
+    "test:go": "go test ./...",
+    "test:live": "bash scripts/live.sh"
+  }
+}

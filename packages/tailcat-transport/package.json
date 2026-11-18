@@ -2,7 +2,7 @@
   "name": "@shst/tailcat-transport",
   "version": "0.0.0",
   "private": true,
-  "description": "Peer-to-peer whiteboard transport over Tailcat, with a WebRTC direct-path upgrade. The Go wrapper builds to wasm.",
+  "description": "Byte streams between peers over Tailcat, with a WebRTC direct-path upgrade, length-prefixed frames and multiplexed RPC. The Go wrapper builds to wasm.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -11,11 +11,8 @@
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
     "test": "node --test 'test/**/*.test.ts'",
-    "test:go": "cd qbtailcat && go test .",
+    "test:go": "cd qbtailcat && go test ./...",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@shst/whiteboard": "workspace:*"
   },
   "devDependencies": {
     "@shst/tsconfig": "workspace:*",

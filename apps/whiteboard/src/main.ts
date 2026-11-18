@@ -1,17 +1,21 @@
 import { WhiteboardService } from '@shst/whiteboard';
 import {
-  acceptWhiteboardPeer,
   answerDirectSession,
   createFrameChannel,
   createMemoryPipe,
   createRpcClient,
-  createTailcatWhiteboardApi,
-  joinWhiteboardSession,
   loadTailcatRuntime,
   offerDirectSession,
   serveRpc,
   unlockLocalAddresses,
 } from '@shst/tailcat-transport';
+import {
+  acceptWhiteboardPeer,
+  createTailcatWhiteboardApi,
+  joinWhiteboardSession,
+  WHITEBOARD_RTC_CHANNEL_LABEL,
+  WHITEBOARD_TAILCAT_PORT,
+} from '@shst/whiteboard-tailcat';
 import { BrowserWhiteboardStore } from './browserWhiteboardStore';
 import { createOptionsControl } from './controls';
 import { createAnnouncer } from './announce';
@@ -41,8 +45,8 @@ import type {
   RtcPath,
   RtcSession,
   RtcSignal,
-  TailcatWhiteboardApi,
 } from '@shst/tailcat-transport';
+import type { TailcatWhiteboardApi } from '@shst/whiteboard-tailcat';
 import type { HostPeer } from './whiteboardHost';
 import type { LiveSync } from './liveSync';
 import type { LiveView } from './liveView';
@@ -579,7 +583,10 @@ async function host(name: string): Promise<void> {
           (rtc) => {
             void serveDirect(rtc, peer, link);
           },
-          { log: rtcLog(`with ${peer.name}`) }
+          {
+            channelLabel: WHITEBOARD_RTC_CHANNEL_LABEL,
+            log: rtcLog(`with ${peer.name}`),
+          }
         );
       if (overRelay && !state.allowRelay && method !== 'info')
         throw Object.assign(
@@ -612,6 +619,7 @@ async function host(name: string): Promise<void> {
 
   const listenStart = performance.now();
   const session = await tailcat.host({
+    port: WHITEBOARD_TAILCAT_PORT,
     // Relay policy for board data is enforced above; the Tailcat session
     // itself must be allowed on the relay to carry signalling.
     allowRelay: true,
@@ -764,6 +772,7 @@ async function join(
   const dialStart = performance.now();
   const { conn, timings } = await tailcat.join({
     code,
+    port: WHITEBOARD_TAILCAT_PORT,
     // Signalling always rides the Tailcat session; board data is gated below.
     allowRelay: true,
     directTimeoutMs: 15000,
@@ -798,6 +807,7 @@ async function join(
   const upgrade = async (): Promise<TailcatWhiteboardApi | undefined> => {
     if (state.rtc === 'off') return undefined;
     const rtcOptions: RtcOptions = {
+      channelLabel: WHITEBOARD_RTC_CHANNEL_LABEL,
       log: rtcLog('to the host'),
       ...(state.rtc === 'blocked' ? { iceTransportPolicy: 'relay' } : {}),
     };

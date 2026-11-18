@@ -180,6 +180,9 @@ importers:
       '@shst/whiteboard':
         specifier: workspace:*
         version: link:../../packages/whiteboard
+      '@shst/whiteboard-tailcat':
+        specifier: workspace:*
+        version: link:../../packages/whiteboard-tailcat
     devDependencies:
       '@shst/tsconfig':
         specifier: workspace:*
@@ -198,10 +201,6 @@ importers:
         version: 8.3.5(@types/node@24.19.1)
 
   packages/tailcat-transport:
-    dependencies:
-      '@shst/whiteboard':
-        specifier: workspace:*
-        version: link:../whiteboard
     devDependencies:
       '@shst/tsconfig':
         specifier: workspace:*
@@ -216,6 +215,25 @@ importers:
   packages/tsconfig: {}
 
   packages/whiteboard:
+    devDependencies:
+      '@shst/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: 24.19.1
+        version: 24.19.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/whiteboard-tailcat:
+    dependencies:
+      '@shst/tailcat-transport':
+        specifier: workspace:*
+        version: link:../tailcat-transport
+      '@shst/whiteboard':
+        specifier: workspace:*
+        version: link:../whiteboard
     devDependencies:
       '@shst/tsconfig':
         specifier: workspace:*

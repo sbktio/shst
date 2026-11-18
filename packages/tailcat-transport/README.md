@@ -1,45 +1,53 @@
 # @shst/tailcat-transport
 
-Runs the whiteboard API peer-to-peer over
-[Tailcat](https://github.com/tailscale/tailcat). There is no tunnel URL and no
-API server: the host runs `WhiteboardService` from
-`@shst/whiteboard` in memory, shows a three-word code, and a
-joiner dials the code and drives the same `WhiteboardApi`. Board data moves to
-a WebRTC data channel when a direct path exists.
+Byte streams between two peers over
+[Tailcat](https://github.com/tailscale/tailcat), with no tunnel URL and no
+server of our own. The host shows a three-word code and a joiner dials it.
+On top of the stream sit length-prefixed JSON frames and multiplexed RPC, and
+the stream moves to a WebRTC data channel when a direct path exists. The
+whiteboard's protocol over it lives in
+[`@shst/whiteboard-tailcat`](../whiteboard-tailcat).
 
 This is a prototype. It uses Tailcat's public DERP relays, so nothing here is
 exercised against the network in CI; the unit tests use in-memory pipes.
 
 ## Pieces
 
-| File                          | Role                                                          |
-| ----------------------------- | ------------------------------------------------------------- |
-| `src/frames.ts`               | Length-prefixed JSON frames, serialized writes                |
-| `src/rpc.ts`                  | Multiplexed request/response with abort and timeout           |
-| `src/memoryPipe.ts`           | In-memory byte stream pair, for the host's own session        |
-| `src/tailcatWhiteboardApi.ts` | Handshake plus a `WhiteboardApi` over RPC                     |
-| `src/tailcatRuntime.ts`       | Loads the wasm and types `qbTailcatHost` and `qbTailcatJoin`  |
-| `src/rtcUpgrade.ts`           | WebRTC offer/answer signalled over the Tailcat session        |
-| `src/rtcStream.ts`            | RTCDataChannel as a byte stream, with backpressure            |
-| `src/rtcDiagnostics.ts`       | Candidate and pair narration, plain-language failure verdicts |
-| `src/syncPacing.ts`           | Watch deadlines, cursor pacing and backoff                    |
-| `qbtailcat/`                  | Go wrapper over Tailcat: word codes, relay policy, wasm + CLI |
+| File                    | Role                                                          |
+| ----------------------- | ------------------------------------------------------------- |
+| `src/frames.ts`         | Length-prefixed JSON frames, serialized writes                |
+| `src/rpc.ts`            | Multiplexed request/response with abort and timeout           |
+| `src/memoryPipe.ts`     | In-memory byte stream pair, for the host's own session        |
+| `src/tailcatRuntime.ts` | Loads the wasm and types `qbTailcatHost` and `qbTailcatJoin`  |
+| `src/rtcUpgrade.ts`     | WebRTC offer/answer signalled over the Tailcat session        |
+| `src/rtcStream.ts`      | RTCDataChannel as a byte stream, with backpressure            |
+| `src/rtcDiagnostics.ts` | Candidate and pair narration, plain-language failure verdicts |
+| `qbtailcat/session/`    | Go library: word codes, relay policy, sessions, drain         |
+| `qbtailcat/cmd/wasm/`   | The browser build of the library, behind `qbTailcatHost/Join` |
 
 TypeScript source is the package entry point; there is no build step for it.
 
+The caller owns the application protocol, so it passes the virtual Tailcat
+`port` to `host` and `join`, and the WebRTC `channelLabel` to
+`offerDirectSession` and `answerDirectSession`. Both sides must agree on each.
+
 ## Build the wasm
 
-Requires Go 1.27 or later. The wrapper pins `github.com/tailscale/tailcat`
-v0.7.0 in `qbtailcat/go.mod`.
+Requires Go 1.27 or later. `qbtailcat/go.mod` replaces
+`github.com/tailscale/tailcat` with the
+[sbktio/tailcat](https://github.com/sbktio/tailcat) fork at a pinned commit,
+verified by `go.sum`. The fork keeps the upstream module path and exports
+`Server.PeerKey`, which the host uses to find a peer's path. The pin names
+the same commit as the `package/tailcat` submodule, and
+`pnpm tailcat:check` (part of `pnpm validate`) fails if they drift.
 
 ```sh
 pnpm --filter @shst/tailcat-transport build:wasm
 pnpm --filter @shst/tailcat-transport test:go
 ```
 
-The script writes `main.wasm`, a gzip copy, `wasm_exec.js` and a native
-`bin/qbtailcat` to `dist/`, which is git-ignored. `apps/whiteboard` serves the
-wasm from there.
+The script writes `main.wasm`, a gzip copy and `wasm_exec.js` to `dist/`,
+which is git-ignored. `apps/whiteboard` serves the wasm from there.
 
 ## Test
 
@@ -98,28 +106,10 @@ That is the native (CLI) behaviour. A browser has no UDP socket, so its
 Tailcat session is always relayed; browsers get a direct path through WebRTC
 instead, below.
 
-## Sync: pushed, not polled
-
-There is no poll interval (`src/syncPacing.ts`, and `liveSync.ts` in apps/whiteboard):
-
-- **Watch.** Every participant keeps one `watch` request open. The host
-  answers it as soon as the board or someone else's presence changes, or after
-  20 s with nothing new, so a dead connection is noticed. A participant's own
-  cursor never wakes their own watch.
-- **Cursor.** Sent only when it changes, with one update in flight, spaced by
-  the measured round trip (33–250 ms), so about 30 updates per second on a
-  direct link and never faster than a relay can answer. Otherwise a heartbeat
-  every 2 s (5 s while hidden) keeps the participant present.
-- **Failures** back off from 250 ms to 5 s.
-
-Measured in the live check: a save reaches the other side in 1–2 ms direct,
-or about 24 ms relayed (it was up to 1 s with polling). An idle room sends only
-heartbeats.
-
 ## Direct path for browsers: WebRTC
 
-After joining over Tailcat, the joiner moves board data to a WebRTC data
-channel (`rtcUpgrade.ts`, `rtcStream.ts`). In the page, the board is usable on
+After joining over Tailcat, the joiner moves the stream to a WebRTC data
+channel (`rtcUpgrade.ts`, `rtcStream.ts`). In the page, the session is usable on
 the relay at once and switches over when the channel opens.
 
 1. The joiner sends a WebRTC offer as an `rtcOffer` call on the Tailcat
@@ -132,12 +122,12 @@ the relay at once and switches over when the channel opens.
    with the same peer identity. The Tailcat session stays open for signalling.
 
 No TURN server is configured, so an open data channel is always peer-to-peer.
-If the upgrade fails, board data stays on the relay, or with
+If the upgrade fails, application data stays on the relay, or with
 `?relay=deny` the session is refused and the relay only ever carried
 signalling.
 
 STUN (for each side's public address) uses public Cloudflare and Google
-servers. Tailcat's relay nodes do not answer STUN. STUN never sees board data.
+servers. Tailcat's relay nodes do not answer STUN. STUN never sees application data.
 
 **Diagnostics.** Each negotiation is narrated in the console
 (`[Collab Whiteboard] WebRTC …`, `rtcDiagnostics.ts`): every address each side
@@ -164,10 +154,12 @@ same-machine runs; `SPIKE_MDNS=1` keeps Chrome's default hiding.
 
 ## Native CLI
 
-Native relay experiments, which can hold a direct path:
+Native programs import `github.com/sbktio/shst/packages/tailcat-transport/qbtailcat/session`. The
+[`shst`](../../apps/shst) CLI is one, and it runs the native relay experiments
+that a browser cannot, since a browser can never hold a direct path:
 
 ```sh
-packages/tailcat-transport/dist/bin/qbtailcat host [-deny-relay]
-packages/tailcat-transport/dist/bin/qbtailcat join [-deny-relay] word word word
-TS_DEBUG_NEVER_DIRECT_UDP=1 packages/tailcat-transport/dist/bin/qbtailcat join ...   # simulate blocked UDP
+shst echo [--deny-relay]
+shst ping [--deny-relay] word word word
+TS_DEBUG_NEVER_DIRECT_UDP=1 shst ping ...   # simulate blocked UDP
 ```

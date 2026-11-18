@@ -13,6 +13,7 @@ import (
 	"syscall/js"
 	"time"
 
+	"github.com/sbktio/shst/packages/tailcat-transport/qbtailcat/session"
 	"tailscale.com/types/logger"
 )
 
@@ -53,7 +54,16 @@ func optLogf(v js.Value) logger.Logf {
 	return logger.Discard
 }
 
-func pathValue(p Path) js.Value {
+// requiredPort reads the virtual Tailcat port the host answers on.
+func requiredPort(v js.Value) (uint16, error) {
+	p := optInt(v, "port", 0)
+	if p < 1 || p > 65535 {
+		return 0, errors.New("port must be 1-65535")
+	}
+	return uint16(p), nil
+}
+
+func pathValue(p session.Path) js.Value {
 	return js.ValueOf(map[string]any{"direct": p.Direct, "via": p.Via})
 }
 
@@ -64,27 +74,31 @@ func jsHost(this js.Value, args []js.Value) any {
 		return rejected(errors.New("qbTailcatHost requires an options object"))
 	}
 	o := args[0]
+	port, err := requiredPort(o)
+	if err != nil {
+		return rejected(err)
+	}
 	onConnection := o.Get("onConnection")
 	onRefused := o.Get("onRefused")
-	opts := hostOptions{
+	opts := session.HostOptions{
 		DERPMapURL: optString(o, "derpMapURL"),
 		AllowRelay: optBool(o, "allowRelay", true),
-		Port:       uint16(optInt(o, "port", 7187)),
+		Port:       port,
 		Logf:       optLogf(o),
 	}
 	return promise(func() (any, error) {
 		if onConnection.Type() != js.TypeFunction {
 			return nil, errors.New("onConnection is required")
 		}
-		opts.OnConn = func(c *sessionConn) { onConnection.Invoke(connValue(c, nil)) }
-		opts.OnRefused = func(p Path) {
+		opts.OnConn = func(c *session.Conn) { onConnection.Invoke(connValue(c)) }
+		opts.OnRefused = func(p session.Path) {
 			if onRefused.Type() == js.TypeFunction {
 				onRefused.Invoke(pathValue(p))
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		h, err := startHost(ctx, opts)
+		h, err := session.StartHost(ctx, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -113,20 +127,24 @@ func jsJoin(this js.Value, args []js.Value) any {
 		return rejected(errors.New("qbTailcatJoin requires an options object"))
 	}
 	o := args[0]
+	port, err := requiredPort(o)
+	if err != nil {
+		return rejected(err)
+	}
 	code := optString(o, "code")
-	opts := joinOptions{
+	opts := session.JoinOptions{
 		DERPMapURL:    optString(o, "derpMapURL"),
 		AllowRelay:    optBool(o, "allowRelay", true),
-		Port:          uint16(optInt(o, "port", 7187)),
+		Port:          port,
 		DirectTimeout: time.Duration(optInt(o, "directTimeoutMs", 15000)) * time.Millisecond,
 		Logf:          optLogf(o),
 	}
 	return promise(func() (any, error) {
-		sc, cl, tm, err := join(context.Background(), code, opts)
+		sc, tm, err := session.Join(context.Background(), code, opts)
 		if err != nil {
 			return nil, err
 		}
-		v := connValue(sc, func() { cl.Close() })
+		v := connValue(sc)
 		v.Set("timings", js.ValueOf(map[string]any{
 			"deriveMs":   tm.DeriveMs,
 			"reachMs":    tm.ReachMs,
@@ -141,11 +159,10 @@ func jsJoin(this js.Value, args []js.Value) any {
 
 // connValue wraps a session as
 //
-//	{ port, read(), write(u8), closeWrite(), close(), path(), closeReason() }
-func connValue(c *sessionConn, onClose func()) js.Value {
+//	{ read(), write(u8), closeWrite(), close(), path(), closeReason() }
+func connValue(c *session.Conn) js.Value {
 	buf := make([]byte, 64<<10)
 	return js.ValueOf(map[string]any{
-		"port": 7187,
 		"read": js.FuncOf(func(js.Value, []js.Value) any {
 			return promise(func() (any, error) {
 				n, err := c.Read(buf)
@@ -178,18 +195,11 @@ func connValue(c *sessionConn, onClose func()) js.Value {
 		}),
 		"closeWrite": js.FuncOf(func(js.Value, []js.Value) any {
 			return promise(func() (any, error) {
-				cw, ok := c.Conn.(interface{ CloseWrite() error })
-				if !ok {
-					return nil, errors.New("connection does not support half-close")
-				}
-				return js.Undefined(), cw.CloseWrite()
+				return js.Undefined(), c.CloseWrite()
 			})
 		}),
 		"close": js.FuncOf(func(js.Value, []js.Value) any {
 			c.Close()
-			if onClose != nil {
-				onClose()
-			}
 			return nil
 		}),
 		"path":        js.FuncOf(func(js.Value, []js.Value) any { return pathValue(c.Path()) }),

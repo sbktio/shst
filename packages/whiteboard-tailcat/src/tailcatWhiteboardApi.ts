@@ -3,10 +3,15 @@ import type {
   WhiteboardEditingLease,
   WhiteboardSnapshot,
 } from '@shst/whiteboard';
-import { createFrameChannel } from './frames.ts';
-import { createRpcClient } from './rpc.ts';
-import type { ByteStream, FrameChannel } from './frames.ts';
-import type { RpcClient } from './rpc.ts';
+import {
+  createFrameChannel,
+  createRpcClient,
+} from '@shst/tailcat-transport';
+import type {
+  ByteStream,
+  FrameChannel,
+  RpcClient,
+} from '@shst/tailcat-transport';
 import type { WhiteboardApi } from '@shst/whiteboard';
 
 /**
@@ -21,6 +26,11 @@ import type { WhiteboardApi } from '@shst/whiteboard';
 export const WHITEBOARD_TAILCAT_PROTOCOL = 'shst-whiteboard/1';
 /** The virtual Tailcat port the host answers on; any other port is refused. */
 export const WHITEBOARD_TAILCAT_PORT = 7187;
+/**
+ * The WebRTC data channel label for the direct-path upgrade. Pass it as the
+ * transport's `channelLabel` on both sides; the host drops any other label.
+ */
+export const WHITEBOARD_RTC_CHANNEL_LABEL = 'whiteboard';
 
 export interface WhiteboardHello {
   t: 'hello';

@@ -3,10 +3,10 @@ import type { FrameChannel } from './frames.ts';
 /**
  * Request/response multiplexing over one frame channel.
  *
- * The room polls, heartbeats, saves and renews editing leases concurrently,
- * so calls are tagged with an id and may complete out of order. One long-lived
- * connection carries them all: dialing Tailcat per request would repeat the
- * DERP rendezvous and handshake every 900 ms.
+ * A client usually has several calls in flight at once (a long poll, a
+ * heartbeat, a save), so calls are tagged with an id and may complete out of
+ * order. One long-lived connection carries them all: dialing Tailcat per
+ * request would repeat the DERP rendezvous and handshake every 900 ms.
  */
 
 interface RpcRequest {

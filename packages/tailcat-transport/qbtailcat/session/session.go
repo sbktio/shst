@@ -1,4 +1,4 @@
-package main
+package session
 
 import (
 	"cmp"
@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tailscale/tailcat"
 	"tailscale.com/tailcfg"
-	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
 )
 
@@ -41,7 +40,9 @@ type Path struct {
 	Via    string `json:"via"`
 }
 
-var errNoDirectPath = errors.New("no direct path to the host; relayed traffic is disabled for this session")
+// ErrNoDirectPath is returned by Join when relay is denied and no direct
+// path to the host appears in time.
+var ErrNoDirectPath = errors.New("no direct path to the host; relayed traffic is disabled for this session")
 
 func orDiscard(logf logger.Logf) logger.Logf {
 	if logf == nil {
@@ -52,18 +53,25 @@ func orDiscard(logf logger.Logf) logger.Logf {
 
 const pathCheckInterval = 3 * time.Second
 
-type hostOptions struct {
+// HostOptions configures StartHost.
+type HostOptions struct {
 	DERPMapURL string
 	AllowRelay bool
-	Port       uint16
-	Logf       logger.Logf
-	// OnConn receives each admitted session. It owns conn.
-	OnConn func(conn *sessionConn)
+	// Port is the virtual Tailcat port the host answers on (1-65535).
+	Port uint16
+	Logf logger.Logf
+	// MaxSessions limits concurrent sessions, including those awaiting relay-policy
+	// admission. Zero means unlimited. Excess connections are rejected with a TCP RST.
+	MaxSessions int
+	// OnConn is required and receives each admitted session. It owns conn.
+	OnConn func(conn *Conn)
 	// OnRefused reports a session refused by the relay policy.
 	OnRefused func(path Path)
 }
 
-type host struct {
+// Host is a Tailcat server reachable with Code, accepting sessions up to
+// HostOptions.MaxSessions.
+type Host struct {
 	Code     string
 	Addr     tailcat.Addr
 	RegionID tailcfg.DERPRegionID
@@ -74,49 +82,69 @@ type host struct {
 	srv          *tailcat.Server
 }
 
-// sessionConn is a session's byte stream plus the path it was admitted on.
-// Close is idempotent and stops any path monitor.
-type sessionConn struct {
+// Conn is a session's byte stream plus the path it was admitted on.
+// Close is idempotent, cancels any path monitor without waiting for it, and
+// releases the Tailcat client when the Conn owns one (sessions made by Join).
+type Conn struct {
 	net.Conn
 	path     Path
 	pathMu   sync.Mutex
-	done     chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
 	once     sync.Once
 	closeErr error
 	reason   string
+	onClose  func()
 }
 
-func newSessionConn(c net.Conn, p Path) *sessionConn {
-	return &sessionConn{Conn: c, path: p, done: make(chan struct{})}
+func newConn(c net.Conn, p Path) *Conn {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Conn{Conn: c, path: p, ctx: ctx, cancel: cancel}
 }
 
-func (c *sessionConn) Path() Path {
+// Path reports the most recently observed path to the peer.
+func (c *Conn) Path() Path {
 	c.pathMu.Lock()
 	defer c.pathMu.Unlock()
 	return c.path
 }
 
-func (c *sessionConn) setPath(p Path) {
+func (c *Conn) setPath(p Path) {
 	c.pathMu.Lock()
 	c.path = p
 	c.pathMu.Unlock()
 }
 
-func (c *sessionConn) closeWithReason(reason string) error {
+func (c *Conn) closeWithReason(reason string) error {
 	c.once.Do(func() {
+		// Waiting for the monitor could deadlock a browser JS callback:
+		// disco work needs the JS event loop to keep running.
+		c.cancel()
 		c.pathMu.Lock()
 		c.reason = reason
 		c.pathMu.Unlock()
-		close(c.done)
 		c.closeErr = c.Conn.Close()
+		if c.onClose != nil {
+			c.onClose()
+		}
 	})
 	return c.closeErr
 }
 
-func (c *sessionConn) Close() error { return c.closeWithReason("") }
+// Close closes the session and, for a joined session, its Tailcat client.
+func (c *Conn) Close() error { return c.closeWithReason("") }
+
+// CloseWrite half-closes the session if the underlying conn supports it.
+func (c *Conn) CloseWrite() error {
+	cw, ok := c.Conn.(interface{ CloseWrite() error })
+	if !ok {
+		return errors.New("connection does not support half-close")
+	}
+	return cw.CloseWrite()
+}
 
 // Reason says why the wrapper closed the session, or "" if it did not.
-func (c *sessionConn) Reason() string {
+func (c *Conn) Reason() string {
 	c.pathMu.Lock()
 	defer c.pathMu.Unlock()
 	return c.reason
@@ -125,14 +153,14 @@ func (c *sessionConn) Reason() string {
 // monitor calls check every pathCheckInterval until the session closes,
 // keeping Path current. When enforce is set (relay denied) it closes the
 // session after two consecutive relayed observations.
-func (c *sessionConn) monitor(check func() (Path, error), enforce bool) {
+func (c *Conn) monitor(check func() (Path, error), enforce bool) {
 	go func() {
 		relayed := 0
 		t := time.NewTicker(pathCheckInterval)
 		defer t.Stop()
 		for {
 			select {
-			case <-c.done:
+			case <-c.ctx.Done():
 				return
 			case <-t.C:
 			}
@@ -168,7 +196,16 @@ func expandRegion(ctx context.Context, regionID tailcfg.DERPRegionID, derpMapURL
 	return ci.Region[0], nil
 }
 
-func startHost(ctx context.Context, opts hostOptions) (*host, error) {
+// StartHost starts a Tailcat server on a fresh session code and admits
+// sessions on opts.Port according to the relay policy and session limit.
+// ctx bounds startup only; use Close to stop the host.
+func StartHost(ctx context.Context, opts HostOptions) (*Host, error) {
+	if opts.OnConn == nil {
+		return nil, errors.New("OnConn is required")
+	}
+	if opts.Port == 0 {
+		return nil, errors.New("port must be 1-65535")
+	}
 	logf := orDiscard(opts.Logf)
 	nearest, probes, err := nearestRegion(ctx, opts.DERPMapURL)
 	if err != nil {
@@ -186,12 +223,18 @@ func startHost(ctx context.Context, opts hostOptions) (*host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading relay region %v: %w", pk.Public.RegionID, err)
 	}
-	h := &host{
+	h := &Host{
 		Code:         canonicalCode(words),
 		Addr:         pk.Public.Addr(),
 		RegionID:     region.RegionID,
 		Region:       region.RegionCode,
 		RegionProbes: probes,
+	}
+	var sessions atomic.Int64
+	release := func() {
+		if opts.MaxSessions > 0 {
+			sessions.Add(-1)
+		}
 	}
 	h.srv = &tailcat.Server{
 		Key:          pk.Private,
@@ -202,46 +245,37 @@ func startHost(ctx context.Context, opts hostOptions) (*host, error) {
 			if port != opts.Port {
 				return nil // RST
 			}
-			return func(c net.Conn) { h.admit(c, opts) }
+			if opts.MaxSessions > 0 && sessions.Add(1) > int64(opts.MaxSessions) {
+				sessions.Add(-1)
+				return nil // RST, before accepting a stream.
+			}
+			return func(c net.Conn) { h.admit(c, opts, release) }
 		},
 	}
-	if err := h.srv.Start(); err != nil {
+	if err := h.srv.StartContext(ctx); err != nil {
+		h.srv.Close()
 		return nil, err
 	}
 	return h, nil
 }
 
-// peerTunnelAddr mirrors tailcat's unexported tcAddrForKey: a peer's tunnel
-// address is fd7a:115c:a1e0::/48 followed by the first 80 bits of its node
-// key. Server status does not fill in TailscaleIPs, so match on this.
-func peerTunnelAddr(k key.NodePublic) netip.Addr {
-	var a [16]byte
-	r := k.Raw32()
-	copy(a[:6], []byte{0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0})
-	copy(a[6:], r[:10])
-	return netip.AddrFrom16(a)
-}
-
 // peerPath reports the server's current path to the peer at remote.
-func (h *host) peerPath(remote net.Addr) (Path, error) {
-	ap, err := netip.ParseAddrPort(remote.String())
-	if err != nil {
-		return Path{}, err
+func (h *Host) peerPath(remote net.Addr) (Path, error) {
+	k, ok := h.srv.PeerKey(remote)
+	if !ok {
+		return Path{}, fmt.Errorf("no peer at %v", remote)
 	}
-	st := h.srv.Status()
-	for k, ps := range st.Peer {
-		if peerTunnelAddr(k) != ap.Addr().Unmap() {
-			continue
-		}
-		if ps.CurAddr != "" {
-			return Path{Direct: true, Via: ps.CurAddr}, nil
-		}
-		return Path{Via: "DERP(" + cmp.Or(ps.Relay, "?") + ")"}, nil
+	ps, ok := h.srv.Status().Peer[k]
+	if !ok {
+		return Path{}, fmt.Errorf("no peer status for %v", remote)
 	}
-	return Path{}, fmt.Errorf("no peer status for %v", ap.Addr())
+	if ps.CurAddr != "" {
+		return Path{Direct: true, Via: ps.CurAddr}, nil
+	}
+	return Path{Via: "DERP(" + cmp.Or(ps.Relay, "?") + ")"}, nil
 }
 
-func (h *host) admit(c net.Conn, opts hostOptions) {
+func (h *Host) admit(c net.Conn, opts HostOptions, onClose func()) {
 	path, _ := h.peerPath(c.RemoteAddr())
 	if !opts.AllowRelay {
 		// The joiner only dials after its own side sees a direct path; give
@@ -252,21 +286,25 @@ func (h *host) admit(c net.Conn, opts hostOptions) {
 		}
 		if !path.Direct {
 			c.Close()
+			onClose()
 			if opts.OnRefused != nil {
 				opts.OnRefused(path)
 			}
 			return
 		}
 	}
-	sc := newSessionConn(c, path)
+	sc := newConn(c, path)
+	sc.onClose = onClose
 	remote := c.RemoteAddr()
 	sc.monitor(func() (Path, error) { return h.peerPath(remote) }, !opts.AllowRelay)
 	opts.OnConn(sc)
 }
 
-func (h *host) Close() { h.srv.Close() }
+// Close stops the host.
+func (h *Host) Close() { h.srv.Close() }
 
-type joinOptions struct {
+// JoinOptions configures Join.
+type JoinOptions struct {
 	DERPMapURL    string
 	AllowRelay    bool
 	Port          uint16
@@ -296,16 +334,23 @@ func discoPath(ctx context.Context, cl *tailcat.Client) (Path, error) {
 	return Path{Via: "DERP(" + cmp.Or(res.DERPRegionCode, res.DERPRegionID.String()) + ")"}, nil
 }
 
-func join(ctx context.Context, code string, opts joinOptions) (*sessionConn, *tailcat.Client, JoinTimings, error) {
+// Join dials the host that code names and returns the session. The returned
+// Conn owns the Tailcat client created here; closing the Conn closes both.
+// ctx bounds setup only; cancelling it after Join returns does not stop the
+// session or its path monitor.
+func Join(ctx context.Context, code string, opts JoinOptions) (*Conn, JoinTimings, error) {
 	var tm JoinTimings
+	if opts.Port == 0 {
+		return nil, tm, errors.New("port must be 1-65535")
+	}
 	words, err := parseCode(code)
 	if err != nil {
-		return nil, nil, tm, err
+		return nil, tm, err
 	}
 	t0 := time.Now()
 	pk, err := keyForCode(words)
 	if err != nil {
-		return nil, nil, tm, err
+		return nil, tm, err
 	}
 	tm.DeriveMs = time.Since(t0).Milliseconds()
 	tm.RegionID = int(pk.Public.RegionID)
@@ -314,9 +359,9 @@ func join(ctx context.Context, code string, opts joinOptions) (*sessionConn, *ta
 		Logf:       orDiscard(opts.Logf),
 		DERPMapURL: opts.DERPMapURL,
 	}
-	fail := func(err error) (*sessionConn, *tailcat.Client, JoinTimings, error) {
+	fail := func(err error) (*Conn, JoinTimings, error) {
 		cl.Close()
-		return nil, nil, tm, err
+		return nil, tm, err
 	}
 
 	// Reach the host over the relay's rendezvous. A wrong or expired code
@@ -328,6 +373,9 @@ func join(ctx context.Context, code string, opts joinOptions) (*sessionConn, *ta
 		pctx, pcancel := context.WithTimeout(reachCtx, 5*time.Second)
 		_, err := cl.Ping(pctx)
 		pcancel()
+		if ctx.Err() != nil {
+			return fail(ctx.Err())
+		}
 		if err == nil {
 			break
 		}
@@ -350,6 +398,9 @@ func join(ctx context.Context, code string, opts joinOptions) (*sessionConn, *ta
 		pctx, pcancel := context.WithTimeout(ctx, 5*time.Second)
 		p, err := discoPath(pctx, cl)
 		pcancel()
+		if ctx.Err() != nil {
+			return fail(ctx.Err())
+		}
 		if err == nil {
 			path = p
 			if tm.Attempts == 1 {
@@ -361,9 +412,13 @@ func join(ctx context.Context, code string, opts joinOptions) (*sessionConn, *ta
 		}
 		if time.Now().After(deadline) {
 			tm.PathMs = time.Since(t2).Milliseconds()
-			return fail(errNoDirectPath)
+			return fail(ErrNoDirectPath)
 		}
-		time.Sleep(time.Second)
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-time.After(time.Second):
+		}
 	}
 	tm.PathMs = time.Since(t2).Milliseconds()
 
@@ -373,11 +428,12 @@ func join(ctx context.Context, code string, opts joinOptions) (*sessionConn, *ta
 		return fail(err)
 	}
 	tm.DialMs = time.Since(t3).Milliseconds()
-	sc := newSessionConn(c, path)
+	sc := newConn(c, path)
+	sc.onClose = func() { cl.Close() }
 	sc.monitor(func() (Path, error) {
-		pctx, pcancel := context.WithTimeout(ctx, 5*time.Second)
+		pctx, pcancel := context.WithTimeout(sc.ctx, 5*time.Second)
 		defer pcancel()
 		return discoPath(pctx, cl)
 	}, !opts.AllowRelay)
-	return sc, cl, tm, nil
+	return sc, tm, nil
 }
