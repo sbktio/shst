@@ -62,6 +62,24 @@ func loadWords() []string {
 
 const codeWordCount = 3
 
+// maxCodeLen is the length of the longest possible canonical code: the
+// longest words joined by hyphens. Longer single tokens cannot be codes.
+var maxCodeLen = func() int {
+	longest := 0
+	for _, w := range wordList {
+		longest = max(longest, len(w))
+	}
+	return codeWordCount*longest + codeWordCount - 1
+}()
+
+// wordCountError is parseCode's error for text that is not three words, as
+// opposed to three words with a misspelling.
+type wordCountError struct{ got int }
+
+func (e wordCountError) Error() string {
+	return fmt.Sprintf("a session code is %d words; got %d", codeWordCount, e.got)
+}
+
 // codeRegions pins which relay a code points at. Host and joiner must agree
 // without talking, so this list cannot follow the live DERP map; changing it
 // is a protocol version change.
@@ -80,7 +98,7 @@ func parseCode(s string) ([]string, error) {
 		return r == ' ' || r == '-' || r == '.' || r == ',' || r == '\t' || r == '\n' || r == '\r'
 	})
 	if len(fields) != codeWordCount {
-		return nil, fmt.Errorf("a session code is %d words; got %d", codeWordCount, len(fields))
+		return nil, wordCountError{len(fields)}
 	}
 	for _, w := range fields {
 		if !wordIndex[w] {

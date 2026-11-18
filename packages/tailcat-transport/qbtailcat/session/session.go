@@ -67,15 +67,20 @@ type HostOptions struct {
 	OnConn func(conn *Conn)
 	// OnRefused reports a session refused by the relay policy.
 	OnRefused func(path Path)
+	// Addressing decides how joiners reach the host. Nil means Words.
+	Addressing Addressing
 }
 
 // Host is a Tailcat server reachable with Code, accepting sessions up to
 // HostOptions.MaxSessions.
 type Host struct {
-	Code     string
-	Addr     tailcat.Addr
-	RegionID tailcfg.DERPRegionID
-	Region   string
+	// Code is the text a joiner needs, in the host's addressing.
+	Code string
+	// Addressing is the name of the host's addressing.
+	Addressing string
+	Addr       tailcat.Addr
+	RegionID   tailcfg.DERPRegionID
+	Region     string
 	// RegionProbes is the measured round trip per region, in ms, when the
 	// wrapper picked the region itself (browser builds).
 	RegionProbes map[string]int64
@@ -193,7 +198,34 @@ func expandRegion(ctx context.Context, regionID tailcfg.DERPRegionID, derpMapURL
 	if err := ci.Expand(ctx, opts...); err != nil {
 		return nil, err
 	}
+	if len(ci.Region) == 0 {
+		return nil, errors.New("the address names no relay region")
+	}
 	return ci.Region[0], nil
+}
+
+// hostRegion returns the relay region a host with key info pub serves. An
+// addressing may embed the region instead of naming a RegionID; that needs no
+// network. Otherwise the region is looked up in the DERP map.
+func hostRegion(ctx context.Context, pub *tailcat.ConnInfo, derpMapURL string) (*tailcfg.DERPRegion, error) {
+	if pub.RegionID == 0 && len(pub.Region) > 0 {
+		ci := &tailcat.ConnInfo{Region: pub.Region}
+		// With an embedded region Expand only normalizes IDs; it does not fetch.
+		if err := ci.Expand(ctx); err != nil {
+			return nil, err
+		}
+		return ci.Region[0], nil
+	}
+	return expandRegion(ctx, pub.RegionID, derpMapURL, true)
+}
+
+// joinRegionID is the relay region an address names: its RegionID, or the
+// embedded region's when RegionID is 0 (addresses from "tailcat resolve").
+func joinRegionID(ci *tailcat.ConnInfo) tailcfg.DERPRegionID {
+	if ci.RegionID == 0 && len(ci.Region) > 0 {
+		return ci.Region[0].RegionID
+	}
+	return ci.RegionID
 }
 
 // StartHost starts a Tailcat server on a fresh session code and admits
@@ -211,20 +243,21 @@ func StartHost(ctx context.Context, opts HostOptions) (*Host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("finding the nearest relay: %w", err)
 	}
-	words, err := newCode(nearest.RegionID)
+	addressing := opts.Addressing
+	if addressing == nil {
+		addressing = Words
+	}
+	pk, code, err := addressing.NewHost(nearest.RegionID)
 	if err != nil {
 		return nil, err
 	}
-	pk, err := keyForCode(words)
-	if err != nil {
-		return nil, err
-	}
-	region, err := expandRegion(ctx, pk.Public.RegionID, opts.DERPMapURL, true)
+	region, err := hostRegion(ctx, &pk.Public, opts.DERPMapURL)
 	if err != nil {
 		return nil, fmt.Errorf("loading relay region %v: %w", pk.Public.RegionID, err)
 	}
 	h := &Host{
-		Code:         canonicalCode(words),
+		Code:         code,
+		Addressing:   addressing.Name(),
 		Addr:         pk.Public.Addr(),
 		RegionID:     region.RegionID,
 		Region:       region.RegionCode,
@@ -310,6 +343,9 @@ type JoinOptions struct {
 	Port          uint16
 	DirectTimeout time.Duration
 	Logf          logger.Logf
+	// Addressings are tried in order to understand the text given to Join.
+	// Nil means DefaultAddressings.
+	Addressings []Addressing
 }
 
 // JoinTimings breaks down where joining spends its time.
@@ -334,7 +370,8 @@ func discoPath(ctx context.Context, cl *tailcat.Client) (Path, error) {
 	return Path{Via: "DERP(" + cmp.Or(res.DERPRegionCode, res.DERPRegionID.String()) + ")"}, nil
 }
 
-// Join dials the host that code names and returns the session. The returned
+// Join dials the host that code names, a word code or a Tailcat address
+// (see JoinOptions.Addressings), and returns the session. The returned
 // Conn owns the Tailcat client created here; closing the Conn closes both.
 // ctx bounds setup only; cancelling it after Join returns does not stop the
 // session or its path monitor.
@@ -343,19 +380,23 @@ func Join(ctx context.Context, code string, opts JoinOptions) (*Conn, JoinTiming
 	if opts.Port == 0 {
 		return nil, tm, errors.New("port must be 1-65535")
 	}
-	words, err := parseCode(code)
-	if err != nil {
-		return nil, tm, err
+	addressings := opts.Addressings
+	if addressings == nil {
+		addressings = DefaultAddressings
 	}
 	t0 := time.Now()
-	pk, err := keyForCode(words)
+	addr, _, err := resolve(code, addressings)
 	if err != nil {
 		return nil, tm, err
 	}
 	tm.DeriveMs = time.Since(t0).Milliseconds()
-	tm.RegionID = int(pk.Public.RegionID)
+	ci, err := tailcat.ParseAddr(addr)
+	if err != nil {
+		return nil, tm, err
+	}
+	tm.RegionID = int(joinRegionID(&ci))
 	cl := &tailcat.Client{
-		Server:     pk.Public.Addr(),
+		Server:     addr,
 		Logf:       orDiscard(opts.Logf),
 		DERPMapURL: opts.DERPMapURL,
 	}
@@ -391,7 +432,7 @@ func Join(ctx context.Context, code string, opts JoinOptions) (*Conn, JoinTiming
 	// (In a browser a disco pong never arrives at all, so blocking here cost
 	// a full probe timeout on every join.)
 	t2 := time.Now()
-	path := Path{Via: fmt.Sprintf("DERP(%d)", pk.Public.RegionID)}
+	path := Path{Via: fmt.Sprintf("DERP(%d)", joinRegionID(&ci))}
 	deadline := time.Now().Add(cmp.Or(opts.DirectTimeout, 15*time.Second))
 	for !opts.AllowRelay {
 		tm.Attempts++
