@@ -6,6 +6,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -67,8 +68,9 @@ func pathValue(p session.Path) js.Value {
 	return js.ValueOf(map[string]any{"direct": p.Direct, "via": p.Via})
 }
 
-// jsHost: qbTailcatHost({ derpMapURL, allowRelay, port, onConnection, onRefused, verbose })
-// → Promise<{ code, addr, regionId, region, close() }>
+// jsHost: qbTailcatHost({ derpMapURL, allowRelay, port, addressing, onConnection, onRefused, verbose })
+// → Promise<{ code, addr, addressing, regionId, region, close() }>
+// addressing is "words" (default) or "address".
 func jsHost(this js.Value, args []js.Value) any {
 	if len(args) != 1 || args[0].Type() != js.TypeObject {
 		return rejected(errors.New("qbTailcatHost requires an options object"))
@@ -78,12 +80,17 @@ func jsHost(this js.Value, args []js.Value) any {
 	if err != nil {
 		return rejected(err)
 	}
+	addressing, err := session.AddressingByName(cmp.Or(optString(o, "addressing"), "words"))
+	if err != nil {
+		return rejected(err)
+	}
 	onConnection := o.Get("onConnection")
 	onRefused := o.Get("onRefused")
 	opts := session.HostOptions{
 		DERPMapURL: optString(o, "derpMapURL"),
 		AllowRelay: optBool(o, "allowRelay", true),
 		Port:       port,
+		Addressing: addressing,
 		Logf:       optLogf(o),
 	}
 	return promise(func() (any, error) {
@@ -109,6 +116,7 @@ func jsHost(this js.Value, args []js.Value) any {
 		return map[string]any{
 			"code":         h.Code,
 			"addr":         string(h.Addr),
+			"addressing":   h.Addressing,
 			"regionId":     int(h.RegionID),
 			"region":       h.Region,
 			"regionProbes": probes,

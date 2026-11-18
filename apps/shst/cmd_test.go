@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sbktio/shst/packages/tailcat-transport/qbtailcat/session"
 )
 
 func TestSummarizeGroupsByPath(t *testing.T) {
@@ -142,6 +144,224 @@ func TestPingRejectsBadCount(t *testing.T) {
 		_, _, err := run("ping", "-n", n, "amber", "tiger", "lunar")
 		if err == nil || !strings.Contains(err.Error(), "at least 1") {
 			t.Errorf("-n %s: err = %v, want a usage error", n, err)
+		}
+	}
+}
+
+func TestAddressingFlagDefaults(t *testing.T) {
+	for _, name := range []string{"host", "echo"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("SHST_ADDRESSING", "")
+			t.Setenv("SHST_QR", "")
+			c, _, err := newRootCmd().Find([]string{name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f := c.Flags().Lookup("addressing"); f == nil || f.DefValue != "words" {
+				t.Errorf("--addressing = %v, want default words", f)
+			}
+			if f := c.Flags().Lookup("qr"); f == nil || f.DefValue != "false" {
+				t.Errorf("--qr = %v, want default false", f)
+			}
+		})
+	}
+}
+
+func TestAddressingEnvFallback(t *testing.T) {
+	t.Setenv("SHST_ADDRESSING", "address")
+	t.Setenv("SHST_QR", "true")
+	for _, name := range []string{"host", "echo"} {
+		c, _, err := newRootCmd().Find([]string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f := c.Flags().Lookup("addressing"); f.DefValue != "address" {
+			t.Errorf("%s: --addressing default = %q, want address from the environment", name, f.DefValue)
+		}
+		if f := c.Flags().Lookup("qr"); f.DefValue != "true" {
+			t.Errorf("%s: --qr default = %q, want true from the environment", name, f.DefValue)
+		}
+	}
+}
+
+func TestEnvQR(t *testing.T) {
+	for _, c := range []struct {
+		val  string
+		want bool
+		bad  bool
+	}{
+		{"", false, false}, {"  ", false, false},
+		{"1", true, false}, {"true", true, false}, {"TRUE", true, false}, {" true ", true, false},
+		{"0", false, false}, {"false", false, false}, {"False", false, false},
+		{"yes", false, true}, {"on", false, true}, {"2", false, true},
+	} {
+		t.Setenv("SHST_QR", c.val)
+		got, err := envQRDefault()
+		if got != c.want || (err != nil) != c.bad {
+			t.Errorf("SHST_QR=%q: got %v, %v; want %v, bad=%v", c.val, got, err, c.want, c.bad)
+		}
+		if err != nil && !strings.Contains(err.Error(), "SHST_QR must be true or false") {
+			t.Errorf("SHST_QR=%q: error %q does not name the variable", c.val, err)
+		}
+	}
+}
+
+// qrFlag returns the --qr value of a command built under the current
+// environment, and what its flag help shows as the default.
+func qrFlag(t *testing.T, name string) (value bool, def string) {
+	t.Helper()
+	c, _, err := newRootCmd().Find([]string{name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := c.Flags().Lookup("qr")
+	return f.Value.String() == "true", f.DefValue
+}
+
+func TestEnvQRSetsFlagDefault(t *testing.T) {
+	for _, c := range []struct{ val, def string }{
+		{"TRUE", "true"}, {"0", "false"}, {"yes", "false"}, {"", "false"},
+	} {
+		t.Setenv("SHST_QR", c.val)
+		if v, def := qrFlag(t, "host"); def != c.def || v != (c.def == "true") {
+			t.Errorf("SHST_QR=%q: flag value %v default %q, want default %q", c.val, v, def, c.def)
+		}
+	}
+}
+
+func TestEnvQRInvalidIsUsageErrorAtRunTime(t *testing.T) {
+	t.Setenv("SHST_QR", "yes")
+	// Unrelated commands are unaffected.
+	if out, _, err := run("version"); err != nil || !strings.HasPrefix(out, "shst ") {
+		t.Fatalf("version: out %q err %v", out, err)
+	}
+	for _, name := range []string{"host", "echo"} {
+		_, _, err := run(name)
+		if err == nil || !strings.Contains(err.Error(), "SHST_QR must be true or false") {
+			t.Errorf("%s: err = %v, want a SHST_QR usage error", name, err)
+		}
+	}
+}
+
+func TestQRFlagOverridesEnv(t *testing.T) {
+	t.Setenv("SHST_QR", "1")
+	c, _, err := newRootCmd().Find([]string{"host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Parse([]string{"--qr=false"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Flags().Lookup("qr").Value.String(); got != "false" {
+		t.Errorf("--qr=false with SHST_QR=1: value %s, want false", got)
+	}
+	// A bad variable does not matter when the flag is given.
+	t.Setenv("SHST_QR", "yes")
+	c, _, _ = newRootCmd().Find([]string{"host"})
+	if err := c.Flags().Parse([]string{"--qr=false"}); err != nil {
+		t.Fatal(err)
+	}
+	var o hostOptions
+	o.qrEnvErr = errors.New("bad")
+	if err := o.check(c); err != nil {
+		t.Errorf("check with --qr given = %v, want nil", err)
+	}
+}
+
+func TestEnvAddressingNormalized(t *testing.T) {
+	for _, v := range []string{" Address ", "ADDRESS", "address"} {
+		t.Setenv("SHST_ADDRESSING", v)
+		got, err := envAddressingDefault()
+		if err != nil || got != "address" {
+			t.Errorf("SHST_ADDRESSING=%q: got %q, %v; want address", v, got, err)
+		}
+	}
+}
+
+func TestEnvAddressingBogusKeepsHelpClean(t *testing.T) {
+	t.Setenv("SHST_ADDRESSING", "bogus")
+	for _, name := range []string{"host", "echo"} {
+		c, _, err := newRootCmd().Find([]string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f := c.Flags().Lookup("addressing"); f.DefValue != "words" {
+			t.Errorf("%s: --addressing default = %q, want words", name, f.DefValue)
+		}
+	}
+	// The error appears when the command runs, before any network use, and
+	// an explicit flag overrides the bad variable (checked via check).
+	for _, name := range []string{"host", "echo"} {
+		_, _, err := run(name)
+		if err == nil || !strings.Contains(err.Error(), "SHST_ADDRESSING") || !strings.Contains(err.Error(), "bogus") {
+			t.Errorf("%s: err = %v, want a SHST_ADDRESSING usage error", name, err)
+		}
+	}
+	if out, _, err := run("version"); err != nil || !strings.HasPrefix(out, "shst ") {
+		t.Errorf("version with a bad variable: %q %v", out, err)
+	}
+}
+
+func TestAnnounceOutput(t *testing.T) {
+	h := &session.Host{Code: "amber-tiger-lunar", Addressing: "words", Region: "nyc", RegionID: 1}
+	var b bytes.Buffer
+	(&hostOptions{}).announce(&b, h, "join with: shst join", false)
+	want := "code: amber-tiger-lunar\njoin with: shst join amber-tiger-lunar\nregion: nyc (1), relay allowed\n"
+	if b.String() != want {
+		t.Errorf("default output = %q, want %q", b.String(), want)
+	}
+	h.Addressing = "address"
+	b.Reset()
+	(&hostOptions{qr: true}).announce(&b, h, "ping with: shst ping", true)
+	out := b.String()
+	if !strings.Contains(out, "\x1b[30;107m") || !strings.Contains(out, "addressing: address\n") ||
+		strings.Index(out, "\x1b[0m") > strings.Index(out, "code: ") || !strings.HasSuffix(out, "relay denied\n") {
+		t.Errorf("address output = %q", out)
+	}
+}
+
+func TestAddressingFlagWinsOverEnv(t *testing.T) {
+	t.Setenv("SHST_ADDRESSING", "address")
+	c, _, err := newRootCmd().Find([]string{"host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Parse([]string{"--addressing", "words"}); err != nil {
+		t.Fatal(err)
+	}
+	o := hostOptions{addressing: c.Flags().Lookup("addressing").Value.String()}
+	a, err := o.resolve()
+	if err != nil || a.Name() != "words" {
+		t.Errorf("resolve = %v, %v; want words", a, err)
+	}
+}
+
+func TestAddressingInvalid(t *testing.T) {
+	for _, args := range [][]string{{"host", "--addressing", "emoji"}, {"echo", "--addressing", "emoji"}} {
+		_, _, err := run(args...)
+		if err == nil {
+			t.Fatalf("%v: want a usage error", args)
+		}
+		for _, want := range []string{"emoji", `"words"`, `"address"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%v: error %q does not mention %s", args, err, want)
+			}
+		}
+	}
+	t.Setenv("SHST_ADDRESSING", "bogus")
+	if _, _, err := run("host"); err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("bad SHST_ADDRESSING: err = %v", err)
+	}
+}
+
+func TestRootHelpDocumentsEnvironment(t *testing.T) {
+	out, _, err := run("--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"SHST_ADDRESSING", "SHST_QR"} {
+		if !strings.Contains(out, v) {
+			t.Errorf("root help does not document %s", v)
 		}
 	}
 }

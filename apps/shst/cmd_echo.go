@@ -16,11 +16,13 @@ import (
 
 // startEcho hosts an echo server that serves any number of sessions at once.
 // Status lines go to status.
-func startEcho(ctx context.Context, port uint16, deny bool, status io.Writer) (*session.Host, error) {
+// A nil addressing means three-word codes.
+func startEcho(ctx context.Context, port uint16, deny bool, addressing session.Addressing, status io.Writer) (*session.Host, error) {
 	return session.StartHost(ctx, session.HostOptions{
 		AllowRelay: !deny,
 		Port:       port,
 		Logf:       logf(),
+		Addressing: addressing,
 		OnConn: func(c *session.Conn) {
 			fmt.Fprintf(status, "session admitted via %s\n", c.Path().Via)
 			go func() {
@@ -42,30 +44,40 @@ func startEcho(ctx context.Context, port uint16, deny bool, status io.Writer) (*
 func newEchoCmd() *cobra.Command {
 	var port uint16
 	var deny bool
+	var opts hostOptions
 	cmd := &cobra.Command{
 		Use:   "echo",
 		Short: "Host an echo server and print its code (pair with ping)",
 		Long: `Host a server that sends back every byte it receives, for any number of
 sessions at once. Use "shst ping CODE" from another machine to measure
-round trips. Runs until interrupted.`,
+round trips. Runs until interrupted. Like host, it takes --addressing and
+--qr.`,
 		Example: `  shst echo
-  shst echo --deny-relay`,
+  shst echo --deny-relay
+  shst echo --addressing address`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := opts.check(cmd); err != nil {
+				return err
+			}
+			addressing, err := opts.resolve()
+			if err != nil {
+				return err
+			}
 			ctx := cmd.Context()
-			h, err := startEcho(ctx, port, deny, os.Stderr)
+			h, err := startEcho(ctx, port, deny, addressing, os.Stderr)
 			if err != nil {
 				return err
 			}
 			defer h.Close()
-			fmt.Fprintf(os.Stderr, "code: %s\nping with: shst ping %s\n", h.Code, h.Code)
-			fmt.Fprintf(os.Stderr, "region: %s (%d), relay %s\n", h.Region, h.RegionID, relayWord(deny))
+			opts.announce(os.Stderr, h, "ping with: shst ping", deny)
 			<-ctx.Done()
 			return nil
 		},
 	}
 	cmd.Flags().Uint16Var(&port, "port", portEcho, "virtual Tailcat port")
 	cmd.Flags().BoolVar(&deny, "deny-relay", false, "refuse sessions that are not on a direct path")
+	opts.addHostFlags(cmd)
 	return cmd
 }
 
@@ -172,8 +184,8 @@ func newPingCmd() *cobra.Command {
 	var n int
 	var duration, directTimeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "ping CODE...",
-		Short: "Measure round trips to an echo host",
+		Use:   "ping CODE|ADDRESS...",
+		Short: "Measure round trips to an echo host by code or address",
 		Long: `Join an echo host (shst echo) and measure round trips with 64-byte
 messages 50 ms apart. Results are grouped by the path in use, so a session
 that starts on the relay and upgrades to a direct path shows both. Results

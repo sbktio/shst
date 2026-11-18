@@ -5,6 +5,9 @@
 set -euo pipefail
 exec 3>&1 # verdicts, even from inside redirected commands
 
+# The environment must not change the defaults under test.
+unset SHST_ADDRESSING SHST_QR
+
 here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here"
 SHST_LIVE=1 go test -run Live -count=1 ./...
@@ -172,4 +175,82 @@ exec 4>&- # EOF for the host's stdin, so the first session can finish
 host_exits
 exits_with 0 "$extrapid" 30 "first joiner finishes after the refusal"
 extrapid=
+# --qr prints ANSI colour QR lines before the code line.
+"$shst" host --qr --addressing address < /dev/null > /dev/null 2> "$work/q.err" & hostpid=$!
+code_from "$work/q.err" > /dev/null
+qrlines=$(grep -c $'^\x1b\\[30;107m.*\x1b\\[0m$' "$work/q.err" || true)
+firstqr=$(grep -n $'^\x1b\\[30;107m' "$work/q.err" | head -n 1 | cut -d: -f1)
+codeline=$(grep -n '^code: ' "$work/q.err" | head -n 1 | cut -d: -f1)
+if [[ $qrlines -ge 27 && -n $firstqr && $firstqr -lt $codeline ]]; then
+  echo "ok   host --qr prints $qrlines ANSI QR lines before the code"
+else
+  echo "FAIL host --qr printed $qrlines ANSI QR lines (want >= 27, before code:)" >&3; exit 1
+fi
+kill -INT "$hostpid"
+exits_with 130 "$hostpid" 10 "host --qr stopped with SIGINT exits 130"
+
+# Raw Tailcat addresses, both directions. The host's code line is the address,
+# so it must start with "tc".
+"$shst" host --addressing address < "$work/send.bin" > /dev/null 2> "$work/a1.err" & hostpid=$!
+addr=$(code_from "$work/a1.err")
+if [[ $addr == tc* ]] && grep -q '^addressing: address$' "$work/a1.err"; then
+  echo "ok   host --addressing address prints a tc address"
+else
+  echo "FAIL host --addressing address printed: $addr" >&3; exit 1
+fi
+bounded 30 "$shst" join "$addr" < /dev/null > "$work/gota1.bin" 2> "$work/ja1.err"
+host_exits
+check "address: host sends 3 MB, joiner receives" "$(sum "$work/send.bin")" "$work/gota1.bin"
+
+"$shst" host --addressing address < /dev/null > "$work/gota2.bin" 2> "$work/a2.err" & hostpid=$!
+addr=$(code_from "$work/a2.err")
+bounded 30 "$shst" join "$addr" < "$work/send.bin" > /dev/null 2> "$work/ja2.err"
+host_exits
+check "address: joiner sends 3 MB, host receives" "$(sum "$work/send.bin")" "$work/gota2.bin"
+
+# ping against an echo host that uses an address.
+"$shst" echo --addressing address > /dev/null 2> "$work/ae.err" & hostpid=$!
+addr=$(code_from "$work/ae.err")
+if [[ $addr != tc* ]]; then echo "FAIL echo --addressing address printed: $addr" >&3; exit 1; fi
+bounded 40 "$shst" ping "$addr" -n 5 --duration 1s
+echo "ok   ping against an echo host with an address"
+kill -INT "$hostpid"
+exits_with 0 "$hostpid" 10 "echo --addressing address stopped with SIGINT exits 0"
+
+# Interop with the upstream tailcat CLI, built from the submodule if present.
+# A server with no arguments prints "# ... Server listening with new address:
+# <tc address>" on stderr, accepts one connection on any port and writes it to
+# stdout. A client "tailcat <address>" dials port 1 and copies stdin and stdout.
+tcsrc="$here/../../package/tailcat"
+tc="$work/tailcat"
+tcskip=
+if [[ ! -f $tcsrc/go.mod ]]; then
+  tcskip="no source at $tcsrc (submodule not checked out)"
+elif ! (cd "$tcsrc" && go build -o "$tc" ./cmd/tailcat) > "$work/tcbuild.log" 2>&1; then
+  # The source is here, so a build failure is a real failure, not a skip.
+  echo "FAIL tailcat interop: build of $tcsrc failed: $(tail -n 5 "$work/tcbuild.log")" >&3; exit 1
+fi
+if [[ -n $tcskip ]]; then
+  echo "skip tailcat interop: $tcskip"
+else
+  "$tc" > "$work/tcgot.bin" 2> "$work/tcs.err" < /dev/null & hostpid=$!
+  taddr=
+  for _ in $(seq 1 100); do
+    taddr=$(sed -n 's/^# .*Server listening with new address: //p' "$work/tcs.err" | head -n 1)
+    [[ -n $taddr ]] && break
+    sleep 0.2
+  done
+  if [[ $taddr != tc* ]]; then
+    echo "FAIL no address from the upstream tailcat server: $(cat "$work/tcs.err")" >&3; exit 1
+  fi
+  bounded 40 "$shst" join "$taddr" < "$work/send.bin" > /dev/null 2> "$work/tcj.err"
+  host_exits
+  check "interop: shst join sends 3 MB to a tailcat server" "$(sum "$work/send.bin")" "$work/tcgot.bin"
+
+  "$shst" host --addressing address --port 1 < "$work/send.bin" > /dev/null 2> "$work/tch.err" & hostpid=$!
+  addr=$(code_from "$work/tch.err")
+  bounded 40 "$tc" "$addr" < /dev/null > "$work/tcgot2.bin" 2> "$work/tcc.err"
+  host_exits
+  check "interop: a tailcat client receives 3 MB from shst host" "$(sum "$work/send.bin")" "$work/tcgot2.bin"
+fi
 echo "live check passed"

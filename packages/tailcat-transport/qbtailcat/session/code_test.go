@@ -64,3 +64,23 @@ func TestNewCodeMatchesRequestedRegion(t *testing.T) {
 		}
 	}
 }
+
+// The resolve chain treats text starting with "tc" as a Tailcat address, so no
+// code word may start with it.
+func TestNoWordStartsWithTC(t *testing.T) {
+	for _, w := range wordList {
+		if strings.HasPrefix(strings.ToLower(w), "tc") {
+			t.Fatalf("word %q starts with \"tc\"", w)
+		}
+	}
+}
+
+func TestMaxCodeLen(t *testing.T) {
+	longest := 0
+	for _, w := range wordList {
+		longest = max(longest, len(w))
+	}
+	if want := 3*longest + 2; maxCodeLen != want {
+		t.Fatalf("maxCodeLen = %d, want %d", maxCodeLen, want)
+	}
+}

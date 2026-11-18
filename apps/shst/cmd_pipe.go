@@ -172,10 +172,13 @@ func isRefused(err error) bool {
 func newHostCmd() *cobra.Command {
 	var port uint16
 	var deny bool
+	var opts hostOptions
 	cmd := &cobra.Command{
 		Use:   "host",
 		Short: "Print a code and pipe stdin/stdout to the first peer that joins",
-		Long: `Start a session and print its three-word code to stderr. The first peer
+		Long: `Start a session and print its code to stderr. By default the code is three
+words. With --addressing address it is a raw Tailcat address, which is long
+but far harder to guess. --qr also prints it as a QR code. The first peer
 to join is admitted and any later one is refused. Stdin goes to the peer and the peer's bytes go to stdout.
 
 When stdin ends the peer sees EOF. Host exits 0 once the peer has finished
@@ -183,15 +186,24 @@ sending and stdin is done. If the relay policy closes the session, host
 exits 1 with the reason. Ctrl-C exits 130 and SIGTERM exits 143.`,
 		Example: `  shst host < file.tar
   tail -f app.log | shst host
-  shst host --deny-relay`,
+  shst host --deny-relay
+  shst host --addressing address --qr < secrets.tar`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := opts.check(cmd); err != nil {
+				return err
+			}
+			addressing, err := opts.resolve()
+			if err != nil {
+				return err
+			}
 			ctx := cmd.Context()
 			conns := make(chan *session.Conn, 1)
 			h, err := session.StartHost(ctx, session.HostOptions{
 				AllowRelay: !deny,
 				Port:       port,
 				Logf:       logf(),
+				Addressing: addressing,
 				// One peer only. The library resets any further connection,
 				// so a second joiner's dial fails.
 				MaxSessions: 1,
@@ -211,8 +223,7 @@ exits 1 with the reason. Ctrl-C exits 130 and SIGTERM exits 143.`,
 				return err
 			}
 			defer h.Close()
-			fmt.Fprintf(os.Stderr, "code: %s\njoin with: shst join %s\n", h.Code, h.Code)
-			fmt.Fprintf(os.Stderr, "region: %s (%d), relay %s\n", h.Region, h.RegionID, relayWord(deny))
+			opts.announce(os.Stderr, h, "join with: shst join", deny)
 			select {
 			case c := <-conns:
 				return runSession(ctx, c)
@@ -223,6 +234,7 @@ exits 1 with the reason. Ctrl-C exits 130 and SIGTERM exits 143.`,
 	}
 	cmd.Flags().Uint16Var(&port, "port", portPipe, "virtual Tailcat port")
 	cmd.Flags().BoolVar(&deny, "deny-relay", false, "refuse sessions that are not on a direct path")
+	opts.addHostFlags(cmd)
 	return cmd
 }
 
@@ -231,13 +243,15 @@ func newJoinCmd() *cobra.Command {
 	var deny bool
 	var directTimeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "join CODE...",
-		Short: "Join a host by code and pipe stdin/stdout to it",
+		Use:   "join CODE|ADDRESS...",
+		Short: "Join a host by code or address and pipe stdin/stdout to it",
 		Long: `Join the session a host printed. The code is three words, separated by
-spaces, hyphens, dots or commas. Stdin goes to the host and the host's
-bytes go to stdout.`,
+spaces, hyphens, dots or commas, or a raw Tailcat address that starts with
+"tc". Join tells them apart. Stdin goes to the host and the host's bytes go
+to stdout.`,
 		Example: `  shst join amber-tiger-lunar > file.tar
-  shst join amber tiger lunar < message.txt`,
+  shst join amber tiger lunar < message.txt
+  shst join tc... > file.tar`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
