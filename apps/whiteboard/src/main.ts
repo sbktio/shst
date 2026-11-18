@@ -82,6 +82,8 @@ interface SpikeState {
     | 'done'
     | 'failed';
   code?: string;
+  /** The raw Tailcat address the code stands for; joining with it also works. */
+  addr?: string;
   /** Characters in the full tailcat address the code stands for. */
   addrLength?: number;
   region?: string;
@@ -634,6 +636,7 @@ async function host(name: string): Promise<void> {
   });
   state.timings.listenMs = Math.round(performance.now() - listenStart);
   state.code = session.code;
+  state.addr = session.addr;
   state.addrLength = session.addr.length;
   state.region = session.region;
   state.regionProbesMs = session.regionProbes;

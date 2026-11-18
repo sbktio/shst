@@ -26,6 +26,7 @@ import type { ViteDevServer } from 'vite';
 interface SpikeState {
   phase: string;
   code?: string;
+  addr?: string;
   transport?: string;
   errors: string[];
   [key: string]: unknown;
@@ -97,10 +98,11 @@ async function waitForState(
 async function runPair(
   relay: Relay,
   rtc: Rtc,
-  runSeconds: number
+  runSeconds: number,
+  joinWith: 'words' | 'address' = 'words'
 ): Promise<{ host: SpikeState; joiner: SpikeState }> {
   assert.ok(browser);
-  const label = `relay-${relay}-rtc-${rtc}`;
+  const label = `relay-${relay}-rtc-${rtc}-${joinWith}`;
   const hostContext = await browser.newContext({ baseURL: baseUrl });
   const joinContext = await browser.newContext({ baseURL: baseUrl });
   try {
@@ -116,11 +118,12 @@ async function runPair(
       });
 
     await host.goto(`/?role=host&name=Henry&relay=${relay}`);
-    const { code } = await waitForState(host, (s) => s.phase === 'hosting', 60_000);
+    const { code, addr } = await waitForState(host, (s) => s.phase === 'hosting', 60_000);
     assert.match(code ?? '', /^[a-z]+-[a-z]+-[a-z]+$/);
+    assert.match(addr ?? '', /^tc/);
 
-    // Join with the words as a person would type them.
-    const typed = (code ?? '').replaceAll('-', ' ');
+    // Join with the words as a person would type them, or paste the address.
+    const typed = joinWith === 'address' ? (addr ?? '') : (code ?? '').replaceAll('-', ' ');
     await joiner.goto(
       `/?role=join&name=Ada&relay=${relay}&rtc=${rtc}&seconds=${runSeconds}&code=${encodeURIComponent(typed)}`
     );
@@ -176,4 +179,12 @@ test('relay denied, WebRTC blocked: the session is refused', { timeout }, async 
   const { joiner } = await runPair('deny', 'blocked', 5);
   assert.equal(joiner.phase, 'failed');
   assert.match(joiner.errors.join('\n'), /no direct path/);
+});
+
+test('joined by the raw Tailcat address instead of the words', { timeout }, async () => {
+  const { host, joiner } = await runPair('allow', 'on', seconds, 'address');
+  assert.deepEqual(joiner.errors, []);
+  assert.equal(joiner.phase, 'done');
+  const people = host.people as string[];
+  assert.ok(people.includes('Henry') && people.includes('Ada'), `people: ${people}`);
 });
